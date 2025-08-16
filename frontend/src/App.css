@@ -1,0 +1,267 @@
+/* ===== ResQPost – App.css ===== */
+
+/* Layout */
+.App {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+main { flex: 1; }
+
+/* -----------------------------
+   Hero
+--------------------------------*/
+.hero-section { position: relative; }
+.missing-label {
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+}
+
+/* -----------------------------
+   Stats cards
+--------------------------------*/
+.stat-card {
+  padding: 2rem 1rem;
+  transition: transform 0.3s ease;
+}
+.stat-card:hover { transform: translateY(-5px); }
+
+/* Feature icons */
+.feature-icon { font-size: 2rem; }
+
+/* -----------------------------
+   Alert cards (list/grid)
+--------------------------------*/
+.alert-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+.alert-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+/* Keep thumbnails consistent (16:9) */
+.alert-card .card-img-top,
+.alert-image{
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+  border-radius: .5rem;
+}
+
+.category-badge{
+  font-size: .8rem;
+  padding: .3rem .8rem;
+}
+
+/* -----------------------------
+   Map
+--------------------------------*/
+.map-container{
+  height: 500px;
+  border-radius: .5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+.leaflet-container{ height: 100%; width: 100%; }
+
+/* -----------------------------
+   Forms
+--------------------------------*/
+.form-container{
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.image-upload-area{
+  border: 2px dashed #dee2e6;
+  border-radius: .5rem;
+  padding: 3rem;
+  text-align: center;
+  transition: border-color .3s ease, background-color .3s ease;
+  cursor: pointer;
+}
+.image-upload-area:hover{ border-color: #0d6efd; background-color: #f8f9fa; }
+.image-upload-area.dragover{ border-color: #0d6efd; background-color: #e3f2fd; }
+
+/* -----------------------------
+   Alert detail page
+--------------------------------*/
+/* Main hero image on the detail page:
+   cap height so it doesn't dominate; crop nicely */
+.alert-detail-image{
+  max-height:420px;
+  width:100%;
+  object-fit:cover;
+  border-radius:.5rem;
+  box-shadow:0 4px 12px rgba(0,0,0,.06);
+}
+
+/* Layout polish for 2-column detail */
+@media (min-width: 992px){
+  .alert-detail-main{ padding-right: 24px; }
+  .alert-detail-aside{ padding-left: 24px; }
+}
+
+/* Neutral, theme-friendly contact card */
+.contact-card{
+  background: #f6f9ff;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 12px;
+}
+.contact-card .card-title{ font-size: var(--h-1); }
+.share-card .btn{ border-radius: 10px; }
+
+/* Optional: tighter stacked sections */
+.section-tight + .section-tight{ margin-top: 1.25rem; }
+
+/* -----------------------------
+   Responsive tweaks
+--------------------------------*/
+@media (max-width: 768px){
+  .hero-section{ height: 60vh; text-align: center; }
+  .display-4{ font-size: 2.5rem; }
+  .stat-card h2{ font-size: 2rem; }
+}
+
+/* -----------------------------
+   Loading
+--------------------------------*/
+.loading-spinner{
+  display: inline-block;
+  width: 2rem; height: 2rem;
+  border: .25em solid rgba(0,0,0,.25);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-border .75s linear infinite;
+}
+@keyframes spinner-border{ to { transform: rotate(360deg); } }
+
+/* Bootstrap icon alignment */
+.bi{ vertical-align: -.125em; }
+
+/* -----------------------------
+   Filters (alerts list)
+--------------------------------*/
+.filter-pills{ gap: .5rem; }
+.filter-pill{
+  padding: .5rem 1rem;
+  border: 1px solid #dee2e6;
+  border-radius: 2rem;
+  background: #fff;
+  cursor: pointer;
+  transition: all .3s ease;
+}
+.filter-pill.active{
+  background: #0d6efd;
+  color: #fff;
+  border-color: #0d6efd;
+}
+.filter-pill:hover:not(.active){
+  background: #f8f9fa;
+  border-color: #0d6efd;
+}
+
+/* -----------------------------
+   Messages
+--------------------------------*/
+.alert-success{ border-left: 4px solid #198754; }
+.alert-danger{ border-left: 4px solid #dc3545; }
+
+/* -----------------------------
+   Scrollbar
+--------------------------------*/
+::-webkit-scrollbar{ width: 8px; }
+::-webkit-scrollbar-track{ background: #f1f1f1; }
+::-webkit-scrollbar-thumb{ background: #888; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover{ background: #555; }
+
+/* -----------------------------
+   Type scale (consistent + responsive)
+--------------------------------*/
+:root{
+  --text-900:#0f172a;   /* main heading/body */
+  --text-700:#334155;   /* section labels / secondary */
+  --text-600:#475569;   /* muted text */
+  --primary-600:#2563eb;
+}
+
+/* Global body text */
+html{ font-size:16px; }
+body{
+  color:var(--text-900);
+  line-height:1.6;
+}
+/* Page & card titles (use the same everywhere) */
+.h-display,               /* used on AlertDetail title */
+h1.page-title,            /* if you add this class anywhere */
+.card-title{              /* card headers in sidebars */
+  font-size:2rem;         /* 32px */
+  line-height:1.25;
+  font-weight:700;
+  color:var(--text-900);
+  margin-bottom:.75rem;
+}
+
+/* Section titles like “Description” */
+.h-1, h2.section-title{
+  font-size:1.5rem;       /* 24px */
+  line-height:1.35;
+  font-weight:700;
+  color:var(--text-900);
+}
+
+/* Meta labels like “Location / Date Reported / Status” */
+.h-2, .meta-label{
+  font-size:.95rem;       /* ~15px */
+  font-weight:600;
+  color:var(--text-700);
+  text-transform:none;    /* keeps natural casing */
+  letter-spacing:.01em;
+  margin-bottom:.25rem;
+}
+
+/* Body text in values under those labels */
+.body-lg, .meta-value, .card-text, p, li{
+  font-size:1.25rem;      
+  color: #000000;
+}
+
+/* Muted helper text */
+.text-muted{ color:var(--text-600) !important; }
+
+
+/* Links (phone/email) – readable and consistent */
+.contact-card a,
+.contact-link{
+  color:var(--primary-600) !important;
+  text-decoration:none;
+}
+.contact-card a:hover,
+.contact-link:hover{ text-decoration:underline; }
+
+
+/* Badges keep their size consistent */
+.badge{ font-weight:600; font-size:.9rem; }
+
+/* Make the three-column meta row spacing consistent */
+.meta-row .col-md-4{ margin-bottom:1rem; }
+@media (min-width:768px){
+  .meta-row .col-md-4{ margin-bottom:0; }
+}
+.clickable { cursor: pointer; }
+.position-relative .map-chip{
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(13,110,253,.92);
+  color: #fff;
+  padding: .4rem .7rem;
+  border-radius: .5rem;
+  font-weight: 600;
+  font-size: .9rem;
+}
+.position-relative .map-chip:hover{ filter: brightness(1.05); }
