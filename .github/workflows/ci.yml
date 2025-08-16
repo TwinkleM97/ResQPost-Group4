@@ -455,6 +455,13 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.7
+      - name: Debug OIDC Token Info
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "OIDC Token: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}"
 
       - name: Configure AWS credentials (OIDC)
         if: ${{ env.ENABLE_TF_PLAN == 'true' }}
