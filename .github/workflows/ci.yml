@@ -15,7 +15,7 @@ env:
   STRICT_TESTS: 'false'
   ENABLE_DOCKER_PUSH: 'true'
   ENABLE_TF_PLAN: 'true'
-  ENABLE_TF_APPLY: 'true'
+  ENABLE_TF_APPLY: 'true' # flip to 'true' when ready to deploy
 
 
 jobs:
