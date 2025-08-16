@@ -427,58 +427,58 @@ jobs:
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
 # ---------------- Terraform PLAN ----------------
-terraform-plan:
-  name: Terraform plan
-  runs-on: ubuntu-latest
-  needs: [validate-infra]
-  env:
-    TF_DIR: terraform
-  steps:
-    - uses: actions/checkout@v4
+  terraform-plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    needs: [validate-infra]
+    env:
+      TF_DIR: terraform
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Show TF dir
-      run: ls -la "$TF_DIR" || true
+      - name: Show TF dir
+        run: ls -la "$TF_DIR" || true
 
-    - uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.7
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
 
-    - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-        aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
 
-    # Build a tfvars from repo Variables/Secrets
-    - name: Create terraform.tfvars
-      working-directory: ${{ env.TF_DIR }}
-      run: |
-        cat > terraform.tfvars <<'TFVARS'
-        aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
-        allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
-        db_user          = "${{ vars.DB_USER       || 'postgres' }}"
-        db_password      = "${{ secrets.DB_PASSWORD }}"
-        db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
-        # images: for plan, any placeholder is fine
-        backend_image    = "dry-run"
-        frontend_image   = "dry-run"
-        # optional S3 settings (safe defaults)
-        create_bucket         = true
-        manage_bucket_policy  = true
-        s3_public_read        = true
-        bucket_name           = "${{ vars.BUCKET_NAME || "" }}"
-        log_retention_days    = 30
-        TFVARS
-        echo "--- terraform.tfvars ---"
-        sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
+      # Build a tfvars from repo Variables/Secrets
+      - name: Create terraform.tfvars
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          cat > terraform.tfvars <<'TFVARS'
+          aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
+          allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
+          db_user          = "${{ vars.DB_USER       || 'postgres' }}"
+          db_password      = "${{ secrets.DB_PASSWORD }}"
+          db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
+          # images: for plan, any placeholder is fine
+          backend_image    = "dry-run"
+          frontend_image   = "dry-run"
+          # optional S3 settings (safe defaults)
+          create_bucket         = true
+          manage_bucket_policy  = true
+          s3_public_read        = true
+          bucket_name           = "${{ vars.BUCKET_NAME || 'resqpost-s3' }}"
+          log_retention_days    = 30
+          TFVARS
+          echo "--- terraform.tfvars ---"
+          sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
 
-    - name: Terraform init
-      working-directory: ${{ env.TF_DIR }}
-      run: terraform init -input=false
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
 
-    - name: Terraform plan
-      working-directory: ${{ env.TF_DIR }}
-      run: terraform plan -input=false -var-file=terraform.tfvars
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -input=false -var-file=terraform.tfvars
 
 
 # ---------------- Terraform APPLY (main only) ----------------
@@ -520,7 +520,7 @@ terraform-plan:
           create_bucket         = true
           manage_bucket_policy  = true
           s3_public_read        = true
-          bucket_name           = "${{ vars.BUCKET_NAME || "" }}"
+          bucket_name           = "${{ vars.BUCKET_NAME || 'resqpost-s3' }}"
           log_retention_days    = 30
           TFVARS
           echo "--- terraform.tfvars ---"
