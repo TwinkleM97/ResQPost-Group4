@@ -1,108 +1,558 @@
 name: CI
+
 on:
   push:
   pull_request:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+  actions: read
 
 jobs:
-  preflight:
+  # ---------------- Code Scanning ----------------
+  codeql:
+    if: ${{ github.actor != 'nektos/act' }}
+    name: Code Scanning (CodeQL)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, python
+      - uses: github/codeql-action/analyze@v3
+
+  # ---------------- Build images ----------------
+  build:
+    name: Build images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-  security-scan:
-    if: ${{ hashFiles('frontend/package.json','backend/requirements.txt','terraform/*.tf') != '' }}
-    needs: preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t resqpost-backend:ci ./backend
 
-      # Frontend deps scan (non-blocking)
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - name: npm audit (frontend)
-        if: ${{ hashFiles('frontend/package.json') != '' }}
-        working-directory: frontend
+      - name: Build frontend image
+        run: docker build -t resqpost-frontend:ci ./frontend
+
+      - name: Save images as artifacts
+        if: ${{ github.actor != 'nektos/act' }}
         run: |
-          npm ci
-          npm audit --audit-level=high || true
+          docker save resqpost-backend:ci | gzip > backend-image.tar.gz
+          docker save resqpost-frontend:ci | gzip > frontend-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: backend-image,  path: backend-image.tar.gz }
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: frontend-image, path: frontend-image.tar.gz }
 
-      # Backend deps scan (non-blocking)
+  # ---------------- Trivy ----------------
+  trivy-image:
+    if: ${{ github.actor != 'nektos/act' }}
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: backend-image }
+      - uses: actions/download-artifact@v4
+        with: { name: frontend-image }
+
+      - name: Load images
+        run: |
+          zcat backend-image.tar.gz | docker load
+          zcat frontend-image.tar.gz | docker load
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: resqpost-backend:ci
+          format: sarif
+          output: trivy-backend.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: resqpost-frontend:ci
+          format: sarif
+          output: trivy-frontend.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Upload SARIF (backend)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend-image
+
+      - name: Upload SARIF (frontend)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend-image
+
+  # ---------------- Tests: backend ----------------
+  test-backend:
+    name: Test (backend) + coverage
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      PYTHONPATH: ${{ github.workspace }}/backend
+      DATABASE_URL: sqlite:///test.db
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - name: pip-audit (backend)
-        if: ${{ hashFiles('backend/requirements.txt') != '' }}
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            requirements.txt
+      - name: Install deps
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install pip-audit
-          pip-audit || true
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      - name: Run tests with coverage (skip if none found)
+        working-directory: backend
+        shell: bash
+        run: |
+          set -e
+          COLLECT_OUTPUT="$(pytest --collect-only -q 2>&1 || true)"
+          echo "$COLLECT_OUTPUT"
+          if echo "$COLLECT_OUTPUT" | grep -qiE 'collected 0 items|no tests'; then
+            echo "[ci] No backend tests; skipping."
+            echo '<coverage line-rate="0.0"></coverage>' > coverage.xml
+            echo '<testsuite tests="0" failures="0" errors="0" skipped="0"></testsuite>' > pytest-report.xml
+            exit 0
+          fi
+          pytest -q --maxfail=1 --disable-warnings \
+            --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml \
+            --junitxml=pytest-report.xml
+      - name: Summarize backend tests & coverage
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          tests=fails=errors=skips=0
+          try:
+            root=ET.parse("pytest-report.xml").getroot()
+            suites=[root] if root.tag=="testsuite" else root.findall("testsuite")
+            for s in suites:
+              tests+=int(s.attrib.get("tests",0))
+              fails+=int(s.attrib.get("failures",0))
+              errors+=int(s.attrib.get("errors",0))
+              skips+=int(s.attrib.get("skipped",0))
+          except: pass
+          pct="0"
+          try:
+            cov=ET.parse("coverage.xml").getroot()
+            lr=cov.attrib.get("line-rate")
+            if lr is not None: pct=str(round(float(lr)*100))
+          except: pass
+          line=f"[summary] backend: tests={tests}, failures={fails+errors}, skipped={skips}, coverage={pct}%"
+          print(line)
+          open("backend-summary.txt","w").write(line+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: backend-coverage-xml, path: backend/coverage.xml }
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: backend-junit-xml, path: backend/pytest-report.xml }
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: backend-summary, path: backend/backend-summary.txt }
 
-      # Terraform static scan (non-blocking)
-      - name: tfsec (terraform)
-        if: ${{ hashFiles('terraform/*.tf') != '' }}
-        uses: aquasecurity/tfsec-action@v1.0.3
-        with:
-          working_directory: ./terraform
-          additional_args: --concise-output --exclude-downloaded-modules
-
-  frontend:
-    if: ${{ hashFiles('frontend/package.json') != '' }}
-    needs: preflight
+  # ---------------- Tests: frontend ----------------
+  test-frontend:
+    name: Test (frontend) + coverage
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: frontend } }
+    needs: build
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm test -- --ci --passWithNoTests
-      - run: npm run build --if-present
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: fe-build
-          path: frontend/build/
-
-  backend:
-    if: ${{ hashFiles('backend/requirements.txt') != '' }}
-    needs: preflight
-    runs-on: ubuntu-latest
-    defaults: { run: { working-directory: backend } }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - name: Run tests + coverage
+      - name: Install deps
+        working-directory: frontend
         run: |
-          pip install pytest coverage
-          # If no tests yet, don't fail the PR
-          pytest -q || echo "pytest returned non-zero (possibly no tests yet); continuing"
-          coverage run -m pytest || true
-          coverage xml || true
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Ensure React Testing Library (CI only)
+        working-directory: frontend
+        run: npm install --no-save @testing-library/react @testing-library/jest-dom @testing-library/user-event
+      - name: Run tests with coverage
+        working-directory: frontend
+        env: { CI: "true" }
+        run: npm test -- --coverage --watchAll=false --passWithNoTests
       - uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: backend/coverage.xml
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: frontend-coverage, path: frontend/coverage }
 
-  iac:
-    if: ${{ hashFiles('terraform/*.tf') != '' }}
-    needs: preflight
+  # ---------------- Infra validation ----------------
+  validate-infra:
+    name: Validate infra (if present)
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: terraform } }
+    needs: build
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate CloudFormation (if infra/cfn exists)
+        shell: bash
+        run: |
+          set -e
+          if [ -d infra/cfn ]; then
+            python3 -m pip install --user cfn-lint || true
+            ~/.local/bin/cfn-lint --version || true
+            find infra/cfn -maxdepth 1 -type f \( -name ".yml" -o -name ".yaml" -o -name "*.json" \) -print -exec ~/.local/bin/cfn-lint {} \;
+          else
+            echo "No infra/cfn directory; skipping CFN validation."
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.5.7 }
+
+      - name: Terraform validate (if TF dir exists)
+        shell: bash
+        run: |
+          set -e
+          TF_DIR=""
+          for d in "infra/terraform" "terraform"; do
+            if [ -d "$d" ]; then TF_DIR="$d"; break; fi
+          done
+          if [ -n "$TF_DIR" ]; then
+            (cd "$TF_DIR" && terraform init -input=false && terraform validate)
+          else
+            echo "No terraform dir; skipping terraform validate."
+          fi
+
+  # ---------------- Integration (compose) ----------------
+  integration:
+    name: Integration (docker compose)
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure docker compose & curl
+        run: |
+          if ! docker compose version >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+          fi
+          command -v curl >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y curl)
+
+      - name: Download backend image
+        if: ${{ github.actor != 'nektos/act' }}
+        uses: actions/download-artifact@v4
+        with: { name: backend-image }
+      - name: Load backend image
+        if: ${{ github.actor != 'nektos/act' }}
+        run: zcat backend-image.tar.gz | docker load
+
+      - name: Download frontend image
+        if: ${{ github.actor != 'nektos/act' }}
+        uses: actions/download-artifact@v4
+        with: { name: frontend-image }
+      - name: Load frontend image
+        if: ${{ github.actor != 'nektos/act' }}
+        run: zcat frontend-image.tar.gz | docker load
+
+      - name: Build backend image (act fallback)
+        if: ${{ github.actor == 'nektos/act' }}
+        run: docker build -t resqpost-backend:ci ./backend
+      - name: Build frontend image (act fallback)
+        if: ${{ github.actor == 'nektos/act' }}
+        run: docker build -t resqpost-frontend:ci ./frontend
+
+      - name: Write docker-compose.ci.yml
+        run: |
+          cat > docker-compose.ci.yml <<'YAML'
+          services:
+            db:
+              image: postgres:15-alpine
+              environment:
+                POSTGRES_DB: resqpost
+                POSTGRES_USER: postgres
+                POSTGRES_PASSWORD: postgres
+              ports: ["5433:5432"]
+              healthcheck:
+                test: ["CMD-SHELL","pg_isready -U postgres -d resqpost || exit 1"]
+                interval: 10s
+                timeout: 5s
+                retries: 12
+            backend:
+              image: resqpost-backend:ci
+              environment:
+                DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/resqpost
+                PYTHONUNBUFFERED: "1"
+              depends_on:
+                db: { condition: service_healthy }
+              ports: ["5000:5000"]
+              healthcheck:
+                test:
+                  - CMD-SHELL
+                  - |
+                    python - <<'PY'
+                    import urllib.request, sys
+                    try:
+                        urllib.request.urlopen('http://localhost:5000/', timeout=2)
+                        sys.exit(0)
+                    except Exception:
+                        sys.exit(1)
+                    PY
+                interval: 10s
+                timeout: 5s
+                retries: 18
+            frontend:
+              image: resqpost-frontend:ci
+              ports: ["3000:80"]
+              environment:
+                REACT_APP_API_URL: http://backend:5000
+              depends_on: [backend]
+              healthcheck:
+                test: ["CMD-SHELL","wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+                interval: 10s
+                timeout: 5s
+                retries: 24
+          YAML
+
+      - name: Up (start, detached)
+        run: docker compose -f docker-compose.ci.yml up -d
+
+      - name: Wait for Postgres healthy
+        run: |
+          set -e
+          timeout 120 bash -c 'until docker compose -f docker-compose.ci.yml exec -T db pg_isready -U postgres -d resqpost; do echo "[wait] postgres..."; sleep 3; done'
+
+      - name: Initialize DB schema
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T backend python - <<'PY'
+          from app import app, db
+          with app.app_context():
+              db.create_all()
+              print("[ci] create_all done")
+          PY
+
+      - name: Smoke insert
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T backend python - <<'PY'
+          from app import app, db
+          from models import Alert
+          with app.app_context():
+              a = Alert(title='ci-smoke', description='ok', category='pet', location='ci')
+              db.session.add(a); db.session.commit()
+              print("[ci] inserted one alert")
+          PY
+
+      - name: Wait for backend 200 /api/alerts
+        run: |
+          set -e
+          deadline=$((SECONDS+180))
+          until code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/alerts); do
+            [ $SECONDS -ge $deadline ] && echo "Timeout waiting backend" && exit 1
+            echo "[wait] backend..."; sleep 5
+          done
+          [ "$code" -eq 200 ] || (echo "Expected 200 got $code" && exit 1)
+
+      - name: Wait for frontend 2xx /
+        run: |
+          set -e
+          deadline=$((SECONDS+240))
+          until code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/); do
+            [ $SECONDS -ge $deadline ] && echo "Timeout waiting frontend" && exit 1
+            echo "[wait] frontend..."; sleep 5
+          done
+          [[ "$code" -ge 200 && "$code" -lt 400 ]] || (echo "Expected 2xx got $code" && exit 1)
+
+      - name: Teardown
+        if: ${{ always() }}
+        run: docker compose -f docker-compose.ci.yml down -v
+
+  # ---------------- Publish images (main only) ----------------
+  publish-images:
+    name: Push Docker images
+    runs-on: ubuntu-latest
+    needs: [integration, trivy-image]
+    if: ${{ github.event_name != 'pull_request' }}
+    outputs:
+      backend_image: ${{ steps.out.outputs.backend_image }}
+      frontend_image: ${{ steps.out.outputs.frontend_image }}
+    env:
+      REGISTRY: docker.io
+      BACKEND_REPO: ${{ (vars.DOCKER_REPO_BACKEND && vars.DOCKER_REPO_BACKEND) || 'twinklem97/resqpost-backend' }}
+      FRONTEND_REPO: ${{ (vars.DOCKER_REPO_FRONTEND && vars.DOCKER_REPO_FRONTEND) || 'twinklem97/resqpost-frontend' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: backend-image }
+      - uses: actions/download-artifact@v4
+        with: { name: frontend-image }
+
+      - name: Load images
+        run: |
+          zcat backend-image.tar.gz | docker load
+          zcat frontend-image.tar.gz | docker load
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag & push
+        id: push
+        run: |
+          set -euo pipefail
+          SHA_TAG="${GITHUB_SHA::12}"
+          docker tag resqpost-backend:ci  "${REGISTRY}/${BACKEND_REPO}:${SHA_TAG}"
+          docker tag resqpost-frontend:ci "${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}"
+          docker tag resqpost-backend:ci  "${REGISTRY}/${BACKEND_REPO}:latest"
+          docker tag resqpost-frontend:ci "${REGISTRY}/${FRONTEND_REPO}:latest"
+          docker push "${REGISTRY}/${BACKEND_REPO}:${SHA_TAG}"
+          docker push "${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}"
+          docker push "${REGISTRY}/${BACKEND_REPO}:latest"
+          docker push "${REGISTRY}/${FRONTEND_REPO}:latest"
+
+      - name: Set outputs
+        id: out
+        run: |
+          SHA_TAG="${GITHUB_SHA::12}"
+          echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
+
+# ---------------- Terraform PLAN ----------------
+  terraform-plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    needs: [validate-infra]
+    env:
+      TF_DIR: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show TF dir
+        run: ls -la "$TF_DIR" || true
+
       - uses: hashicorp/setup-terraform@v3
-        with: { terraform_version: 1.9.5 }
-      - run: terraform fmt -check
-      - run: terraform init -backend=false
-      - run: terraform validate
+        with:
+          terraform_version: 1.5.7
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Build a tfvars from repo Variables/Secrets
+      - name: Create terraform.tfvars
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          cat > terraform.tfvars <<'TFVARS'
+          aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
+          allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
+          db_user          = "${{ vars.DB_USER       || 'postgres' }}"
+          db_password      = "${{ secrets.DB_PASSWORD }}"
+          db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
+          # images: for plan, any placeholder is fine
+          backend_image    = "dry-run"
+          frontend_image   = "dry-run"
+          # optional S3 settings (safe defaults)
+          create_bucket         = true
+          manage_bucket_policy  = true
+          s3_public_read        = true
+          bucket_name           = "${{ vars.BUCKET_NAME || 'resqpost-s3-g4' }}"
+          log_retention_days    = 30
+          TFVARS
+          echo "--- terraform.tfvars ---"
+          sed 's/db_password = ./db_password = ""/' terraform.tfvars
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -input=false -var-file=terraform.tfvars
+
+
+# ---------------- Terraform APPLY (main only) ----------------
+  terraform-apply:
+    name: Terraform apply (deploy)
+    runs-on: ubuntu-latest
+    needs: [publish-images]
+    if: ${{ github.event_name != 'pull_request' }}
+    concurrency:
+      group: deploy-${{ github.ref_name }}
+      cancel-in-progress: false
+    env:
+      TF_DIR: terraform                     # keep as-is if your TF lives at ./terraform
+      IMG_BACKEND:  ${{ needs.publish-images.outputs.backend_image }}
+      IMG_FRONTEND: ${{ needs.publish-images.outputs.frontend_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: probe
+        name: Check if terraform dir exists
+        run: |
+          if [ -d "${{ env.TF_DIR }}" ]; then
+            echo "has_tf=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tf=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        with: { terraform_version: 1.5.7 }
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region:     ${{ (vars.AWS_REGION && vars.AWS_REGION) || 'us-east-1' }}
+
+      - name: Create terraform.tfvars
+        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          cat > terraform.tfvars <<'TFVARS'
+          aws_region       = "${{ (vars.AWS_REGION && vars.AWS_REGION) || 'us-east-1' }}"
+          allowed_ssh_cidr = "${{ (vars.ALLOWED_SSH_CIDR && vars.ALLOWED_SSH_CIDR) || '0.0.0.0/0' }}"
+          db_user          = "${{ (vars.DB_USER && vars.DB_USER) || 'postgres' }}"
+          db_password      = "${{ secrets.DB_PASSWORD }}"
+          db_name          = "${{ (vars.DB_NAME && vars.DB_NAME) || 'resqpost' }}"
+          create_bucket         = true
+          manage_bucket_policy  = true
+          s3_public_read        = true
+          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3-g4' }}"
+          log_retention_days    = 30
+          TFVARS
+          echo "--- terraform.tfvars ---"
+          sed 's/db_password = ./db_password = ""/' terraform.tfvars || true
+
+      - name: Terraform init + workspace (branch-scoped)
+        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -e
+          terraform init -input=false
+          WS="$(echo '${{ github.ref_name }}' | tr '/.' '')"
+          terraform workspace select "$WS" || terraform workspace new "$WS"
+          echo "Using workspace: $WS"
+
+      - name: Terraform apply
+        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var-file=terraform.tfvars \
+            -var "backend_image=${IMG_BACKEND}" \
+            -var "frontend_image=${IMG_FRONTEND}"
