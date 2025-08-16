@@ -422,10 +422,10 @@ jobs:
 
   # ---------------- Terraform PLAN on PRs ----------------
   terraform-plan:
-    name: Terraform plan (PR)
+    name: Terraform plan
     runs-on: ubuntu-latest
     needs: [validate-infra]
-    if: ${{ github.event_name == 'pull_request' }}
+  # Run on both push and PR; actual TF steps still gated by the probe
     steps:
       - uses: actions/checkout@v4
 
@@ -461,6 +461,7 @@ jobs:
           TF_VAR_backend_image: 'dry-run'
           TF_VAR_frontend_image: 'dry-run'
         run: terraform plan -input=false
+
 
   # ---------------- Terraform APPLY on push to main ----------------
   terraform-apply:
