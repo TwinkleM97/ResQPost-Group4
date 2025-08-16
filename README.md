@@ -147,7 +147,7 @@ cd terraform
 terraform init
 terraform plan
 terraform apply
-# destroy when done.
+# destroy when done
 terraform destroy
 ```
 ### Output will look like
