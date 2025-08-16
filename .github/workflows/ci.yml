@@ -455,23 +455,12 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.7
-      - name: Debug OIDC Token Info
-        run: |
-          echo "Repository: ${{ github.repository }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "OIDC Token: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}"
-
-      - name: Configure AWS credentials (OIDC)
-        if: ${{ env.ENABLE_TF_PLAN == 'true' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
-
-      - name: Who am I?
-        run: aws sts get-caller-identity
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Create terraform.tfvars
         if: ${{ env.ENABLE_TF_PLAN == 'true' }}
@@ -533,12 +522,12 @@ jobs:
         if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         with: { terraform_version: 1.5.7 }
 
-      - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region:     ${{ (vars.AWS_REGION && vars.AWS_REGION) || 'us-east-1' }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Create terraform.tfvars
         if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
