@@ -10,12 +10,12 @@ permissions:
   id-token: write
   actions: read
 
-# Global toggles (leave as 'false' until secrets/roles exist)
+# Global toggles (flip to 'true' when ready)
 env:
   STRICT_TESTS: 'false'
-  ENABLE_DOCKER_PUSH: 'true'
-  ENABLE_TF_PLAN: 'true'
-  ENABLE_TF_APPLY: 'false'  # manual enable only
+  ENABLE_DOCKER_PUSH: 'false'
+  ENABLE_TF_PLAN: 'false'
+  ENABLE_TF_APPLY: 'false'
 
 jobs:
   # ---------------- Code Scanning ----------------
@@ -384,15 +384,12 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.ci.yml down -v
 
-  # ---------------- Publish images (guarded) ----------------
+  # ---------------- Publish images (guarded via steps) ----------------
   publish-images:
     name: Push Docker images
     runs-on: ubuntu-latest
     needs: [integration, trivy-image]
-    if: ${{ github.event_name != 'pull_request'
-           && env.ENABLE_DOCKER_PUSH == 'true'
-           && secrets.DOCKERHUB_USERNAME != ''
-           && secrets.DOCKERHUB_TOKEN != '' }}
+    if: ${{ github.event_name != 'pull_request' }}   # keep job-level simple
     outputs:
       backend_image: ${{ steps.out.outputs.backend_image }}
       frontend_image: ${{ steps.out.outputs.frontend_image }}
@@ -412,13 +409,14 @@ jobs:
           zcat frontend-image.tar.gz | docker load
 
       - name: Login to Docker Hub
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.ENABLE_DOCKER_PUSH == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Tag & push
+        if: ${{ env.ENABLE_DOCKER_PUSH == 'true' }}
         id: push
         run: |
           set -euo pipefail
@@ -439,12 +437,11 @@ jobs:
           echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
-  # ---------------- Terraform PLAN (guarded) ----------------
+  # ---------------- Terraform PLAN (guarded via steps) ----------------
   terraform-plan:
     name: Terraform plan
     runs-on: ubuntu-latest
     needs: [validate-infra]
-    if: ${{ env.ENABLE_TF_PLAN == 'true' && secrets.AWS_DEPLOY_ROLE_ARN != '' }}
     env:
       TF_DIR: terraform
     steps:
@@ -458,12 +455,14 @@ jobs:
           terraform_version: 1.5.7
 
       - name: Configure AWS credentials (OIDC)
+        if: ${{ env.ENABLE_TF_PLAN == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Create terraform.tfvars
+        if: ${{ env.ENABLE_TF_PLAN == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
           cat > terraform.tfvars <<'TFVARS'
@@ -484,21 +483,21 @@ jobs:
           sed 's/db_password = ./db_password = ""/' terraform.tfvars
 
       - name: Terraform init
+        if: ${{ env.ENABLE_TF_PLAN == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
 
       - name: Terraform plan
+        if: ${{ env.ENABLE_TF_PLAN == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: terraform plan -input=false -var-file=terraform.tfvars
 
-  # ---------------- Terraform APPLY (guarded) ----------------
+  # ---------------- Terraform APPLY (guarded via steps) ----------------
   terraform-apply:
     name: Terraform apply (deploy)
     runs-on: ubuntu-latest
     needs: [publish-images]
-    if: ${{ github.event_name != 'pull_request'
-           && env.ENABLE_TF_APPLY == 'true'
-           && secrets.AWS_DEPLOY_ROLE_ARN != '' }}
+    if: ${{ github.event_name != 'pull_request' }}   # keep job-level simple
     concurrency:
       group: deploy-${{ github.ref_name }}
       cancel-in-progress: false
@@ -519,18 +518,18 @@ jobs:
           fi
 
       - uses: hashicorp/setup-terraform@v3
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         with: { terraform_version: 1.5.7 }
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region:     ${{ (vars.AWS_REGION && vars.AWS_REGION) || 'us-east-1' }}
 
       - name: Create terraform.tfvars
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
           cat > terraform.tfvars <<'TFVARS'
@@ -549,7 +548,7 @@ jobs:
           sed 's/db_password = ./db_password = ""/' terraform.tfvars || true
 
       - name: Terraform init + workspace (branch-scoped)
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
           set -e
@@ -559,7 +558,7 @@ jobs:
           echo "Using workspace: $WS"
 
       - name: Terraform apply
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform apply -auto-approve -input=false \
