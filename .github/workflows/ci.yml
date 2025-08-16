@@ -11,6 +11,10 @@ permissions:
   security-events: write
   id-token: write
   actions: read
+env:
+  REACT_APP_API_URL: /api
+  GENERATE_SOURCEMAP: 'false'
+
 
 jobs:
   # ---------------- Code Scanning ----------------
@@ -37,7 +41,11 @@ jobs:
         run: docker build -t resqpost-backend:ci ./backend
 
       - name: Build frontend image
-        run: docker build -t resqpost-frontend:ci ./frontend
+        run: |
+          docker build \
+            --build-arg REACT_APP_API_URL="${{ env.REACT_APP_API_URL }}" \
+            --build-arg GENERATE_SOURCEMAP="${{ env.GENERATE_SOURCEMAP }}" \
+            -t resqpost-frontend:ci ./frontend
 
       - name: Save images as artifacts
         if: ${{ github.actor != 'nektos/act' }}
