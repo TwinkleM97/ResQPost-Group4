@@ -147,7 +147,7 @@ cd terraform
 terraform init
 terraform plan
 terraform apply
-# destroy when done
+# destroy when done..
 terraform destroy
 ```
 ### Output will look like
@@ -167,7 +167,7 @@ db_port = 5432
 ### In case the alerts are not submitting, the alerts table was not created successfully.
 
 ```bash
-#ssh into your ec2
+#ssh into your ec2.
 ssh -i resqpost-key.pem ec2-user@<your-public-ec2-ip>
 
 #Show docker containers (should show resqpost-db)
