@@ -9,68 +9,14 @@ on:
 permissions:
   contents: read
   security-events: write
-  id-token: write      # needed for AWS OIDC
+  id-token: write     # needed for AWS OIDC
   actions: read
 
+# Repo-wide env
+env:
+  TF_DIR: terraform    # <- your Terraform directory (was infra/terraform before)
+
 jobs:
-  # ---------------- Code Scanning ----------------
-  codeql:
-    if: ${{ github.actor != 'nektos/act' }}
-    name: Code Scanning (CodeQL)
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: javascript, python
-      - uses: github/codeql-action/analyze@v3
-
-  trivy-image:
-    if: ${{ github.actor != 'nektos/act' }}
-    name: Trivy Image Scan
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: backend-image }
-      - uses: actions/download-artifact@v4
-        with: { name: frontend-image }
-
-      - name: Load images
-        run: |
-          zcat backend-image.tar.gz | docker load
-          zcat frontend-image.tar.gz | docker load
-
-      - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: resqpost-backend:ci
-          format: sarif
-          output: trivy-backend.sarif
-          ignore-unfixed: true
-          vuln-type: os,library
-
-      - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: resqpost-frontend:ci
-          format: sarif
-          output: trivy-frontend.sarif
-          ignore-unfixed: true
-          vuln-type: os,library
-
-      - name: Upload SARIF (backend image)
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-backend.sarif
-          category: trivy-backend-image
-      - name: Upload SARIF (frontend image)
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-frontend.sarif
-          category: trivy-frontend-image
-
   # ---------------- Build images ----------------
   build:
     name: Build images
@@ -91,10 +37,14 @@ jobs:
           docker save resqpost-frontend:ci | gzip > frontend-image.tar.gz
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: backend-image,  path: backend-image.tar.gz }
+        with:
+          name: backend-image
+          path: backend-image.tar.gz
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: frontend-image, path: frontend-image.tar.gz }
+        with:
+          name: frontend-image
+          path: frontend-image.tar.gz
 
   # ---------------- Tests: backend ----------------
   test-backend:
@@ -106,6 +56,7 @@ jobs:
       DATABASE_URL: sqlite:///test.db
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -113,12 +64,14 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             requirements.txt
+
       - name: Install deps
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov
+
       - name: Run tests with coverage (skip if none found)
         working-directory: backend
         shell: bash
@@ -135,6 +88,7 @@ jobs:
           pytest -q --maxfail=1 --disable-warnings \
             --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml \
             --junitxml=pytest-report.xml
+
       - name: Summarize backend tests & coverage
         working-directory: backend
         run: |
@@ -160,15 +114,22 @@ jobs:
           print(line)
           open("backend-summary.txt","w").write(line+"\n")
           PY
+
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: backend-coverage-xml, path: backend/coverage.xml }
+        with:
+          name: backend-coverage-xml
+          path: backend/coverage.xml
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: backend-junit-xml, path: backend/pytest-report.xml }
+        with:
+          name: backend-junit-xml
+          path: backend/pytest-report.xml
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: backend-summary, path: backend/backend-summary.txt }
+        with:
+          name: backend-summary
+          path: backend/backend-summary.txt
 
   # ---------------- Tests: frontend ----------------
   test-frontend:
@@ -177,25 +138,33 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
       - name: Install deps
         working-directory: frontend
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
       - name: Ensure React Testing Library (CI only)
         working-directory: frontend
         run: npm install --no-save @testing-library/react @testing-library/jest-dom @testing-library/user-event
+
       - name: Run tests with coverage
         working-directory: frontend
-        env: { CI: "true" }
+        env:
+          CI: "true"
         run: npm test -- --coverage --watchAll=false --passWithNoTests
+
       - uses: actions/upload-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        with: { name: frontend-coverage, path: frontend/coverage }
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
 
   # ---------------- Infra validation ----------------
   validate-infra:
@@ -219,16 +188,17 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with: { terraform_version: 1.5.7 }
+        with:
+          terraform_version: 1.5.7
 
-      - name: Terraform validate (if infra/terraform exists)
+      - name: Terraform validate (if terraform exists)
         shell: bash
         run: |
           set -e
-          if [ -d infra/terraform ]; then
-            (cd infra/terraform && terraform init -input=false && terraform validate)
+          if [ -d "${{ env.TF_DIR }}" ]; then
+            (cd "${{ env.TF_DIR }}" && terraform init -input=false && terraform validate)
           else
-            echo "No infra/terraform; skipping Terraform validate."
+            echo "No ${{ env.TF_DIR }}; skipping Terraform validate."
           fi
 
   # ---------------- Integration (compose) ----------------
@@ -249,7 +219,8 @@ jobs:
       - name: Download backend image
         if: ${{ github.actor != 'nektos/act' }}
         uses: actions/download-artifact@v4
-        with: { name: backend-image }
+        with:
+          name: backend-image
       - name: Load backend image
         if: ${{ github.actor != 'nektos/act' }}
         run: zcat backend-image.tar.gz | docker load
@@ -257,7 +228,8 @@ jobs:
       - name: Download frontend image
         if: ${{ github.actor != 'nektos/act' }}
         uses: actions/download-artifact@v4
-        with: { name: frontend-image }
+        with:
+          name: frontend-image
       - name: Load frontend image
         if: ${{ github.actor != 'nektos/act' }}
         run: zcat frontend-image.tar.gz | docker load
@@ -285,6 +257,7 @@ jobs:
                 interval: 10s
                 timeout: 5s
                 retries: 12
+
             backend:
               image: resqpost-backend:ci
               environment:
@@ -308,6 +281,7 @@ jobs:
                 interval: 10s
                 timeout: 5s
                 retries: 18
+
             frontend:
               image: resqpost-frontend:ci
               ports: ["3000:80"]
@@ -373,6 +347,68 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.ci.yml down -v
 
+  # ---------------- Trivy Image Scan ----------------
+  trivy-image:
+    if: ${{ github.actor != 'nektos/act' }}
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+
+      - name: Load images
+        run: |
+          zcat backend-image.tar.gz | docker load
+          zcat frontend-image.tar.gz | docker load
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: resqpost-backend:ci
+          format: sarif
+          output: trivy-backend.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: resqpost-frontend:ci
+          format: sarif
+          output: trivy-frontend.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Upload SARIF (backend image)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend-image
+
+      - name: Upload SARIF (frontend image)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend-image
+
+  # ---------------- Code Scanning (CodeQL) ----------------
+  codeql:
+    if: ${{ github.actor != 'nektos/act' }}
+    name: Code Scanning (CodeQL)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, python
+      - uses: github/codeql-action/analyze@v3
+
   # ---------------- Publish images ----------------
   publish-images:
     name: Push Docker images
@@ -388,18 +424,23 @@ jobs:
       FRONTEND_REPO: ${{ vars.DOCKER_REPO_FRONTEND || 'twinklem97/resqpost-frontend' }}
     steps:
       - uses: actions/download-artifact@v4
-        with: { name: backend-image }
+        with:
+          name: backend-image
       - uses: actions/download-artifact@v4
-        with: { name: frontend-image }
+        with:
+          name: frontend-image
+
       - name: Load images
         run: |
           zcat backend-image.tar.gz | docker load
           zcat frontend-image.tar.gz | docker load
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Tag & push
         id: push
         run: |
@@ -413,6 +454,7 @@ jobs:
           docker push "${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}"
           docker push "${REGISTRY}/${BACKEND_REPO}:latest"
           docker push "${REGISTRY}/${FRONTEND_REPO}:latest"
+
       - name: Set outputs
         id: out
         run: |
@@ -420,21 +462,21 @@ jobs:
           echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
-  # ---------------- Terraform PLAN on PRs ----------------
+  # ---------------- Terraform PLAN ----------------
   terraform-plan:
-    name: Terraform plan (PR)
+    name: Terraform plan (PR/push)
     runs-on: ubuntu-latest
     needs: [validate-infra]
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
     steps:
       - uses: actions/checkout@v4
 
       - id: probe
-        name: Check if infra/terraform exists
+        name: Check if ${{ env.TF_DIR }} exists
         run: |
-          if [ -d infra/terraform ]; then
+          if [ -d "${{ env.TF_DIR }}" ]; then
             echo "has_tf=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_tf=false" >> "$GITHUB_OUTPUT"
@@ -442,7 +484,8 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        with: { terraform_version: 1.5.7 }
+        with:
+          terraform_version: 1.5.7
 
       - uses: aws-actions/configure-aws-credentials@v4
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
@@ -452,18 +495,18 @@ jobs:
 
       - name: Terraform init
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
 
       - name: Terraform plan
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        working-directory: ${{ env.TF_DIR }}
         env:
           TF_VAR_backend_image: 'dry-run'
           TF_VAR_frontend_image: 'dry-run'
         run: terraform plan -input=false
 
-  # ---------------- Terraform APPLY on push to main ----------------
+  # ---------------- Terraform APPLY ----------------
   terraform-apply:
     name: Terraform apply (deploy)
     runs-on: ubuntu-latest
@@ -480,9 +523,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: probe
-        name: Check if infra/terraform exists
+        name: Check if ${{ env.TF_DIR }} exists
         run: |
-          if [ -d infra/terraform ]; then
+          if [ -d "${{ env.TF_DIR }}" ]; then
             echo "has_tf=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_tf=false" >> "$GITHUB_OUTPUT"
@@ -490,7 +533,8 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        with: { terraform_version: 1.5.7 }
+        with:
+          terraform_version: 1.5.7
 
       - name: Configure AWS credentials (OIDC)
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
@@ -501,14 +545,14 @@ jobs:
 
       - name: Terraform init
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
 
       - name: Terraform apply
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        working-directory: ${{ env.TF_DIR }}
         run: |
           set -e
           terraform apply -auto-approve -input=false
-          # To force EC2 reprovision every deploy, uncomment:
+          # To force EC2 reprovision on every deploy, uncomment:
           # terraform apply -auto-approve -input=false -replace=aws_instance.app
