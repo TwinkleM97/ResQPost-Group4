@@ -342,6 +342,14 @@ def on_send_message(data):
 # -----------------------------
 # Health
 # -----------------------------
+# -----------------------------
+# Root (simple OK for tests/healthchecks)
+# -----------------------------
+@app.route('/', methods=['GET'])
+def root_ok():
+    # keep it lightweight and cacheable by default
+    return jsonify({"ok": True, "service": "resqpost-backend"}), 200
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
