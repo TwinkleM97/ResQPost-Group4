@@ -482,58 +482,58 @@ terraform-plan:
 
 
 # ---------------- Terraform APPLY (main only) ----------------
-terraform-apply:
-  name: Terraform apply (deploy)
-  runs-on: ubuntu-latest
-  needs: [publish-images]
-  if: github.ref == 'refs/heads/main'
-  concurrency:
-    group: deploy-${{ github.ref }}
-    cancel-in-progress: false
-  env:
-    TF_DIR: terraform
-    # images from publish step
-    IMG_BACKEND:  ${{ needs.publish-images.outputs.backend_image }}
-    IMG_FRONTEND: ${{ needs.publish-images.outputs.frontend_image }}
-  steps:
-    - uses: actions/checkout@v4
+  terraform-apply:
+    name: Terraform apply (deploy)
+    runs-on: ubuntu-latest
+    needs: [publish-images]
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      TF_DIR: terraform
+      # images from publish step
+      IMG_BACKEND:  ${{ needs.publish-images.outputs.backend_image }}
+      IMG_FRONTEND: ${{ needs.publish-images.outputs.frontend_image }}
+    steps:
+      - uses: actions/checkout@v4
 
-    - uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.7
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
 
-    - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-        aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
 
-    - name: Create terraform.tfvars
-      working-directory: ${{ env.TF_DIR }}
-      run: |
-        cat > terraform.tfvars <<'TFVARS'
-        aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
-        allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
-        db_user          = "${{ vars.DB_USER       || 'postgres' }}"
-        db_password      = "${{ secrets.DB_PASSWORD }}"
-        db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
-        create_bucket         = true
-        manage_bucket_policy  = true
-        s3_public_read        = true
-        bucket_name           = "${{ vars.BUCKET_NAME || "" }}"
-        log_retention_days    = 30
-        TFVARS
-        echo "--- terraform.tfvars ---"
-        sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
+      - name: Create terraform.tfvars
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          cat > terraform.tfvars <<'TFVARS'
+          aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
+          allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
+          db_user          = "${{ vars.DB_USER       || 'postgres' }}"
+          db_password      = "${{ secrets.DB_PASSWORD }}"
+          db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
+          create_bucket         = true
+          manage_bucket_policy  = true
+          s3_public_read        = true
+          bucket_name           = "${{ vars.BUCKET_NAME || "" }}"
+          log_retention_days    = 30
+          TFVARS
+          echo "--- terraform.tfvars ---"
+          sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
 
-    - name: Terraform init
-      working-directory: ${{ env.TF_DIR }}
-      run: terraform init -input=false
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
 
-    - name: Terraform apply
-      working-directory: ${{ env.TF_DIR }}
-      run: |
-        terraform apply -auto-approve -input=false \
-          -var-file=terraform.tfvars \
-          -var "backend_image=${IMG_BACKEND}" \
-          -var "frontend_image=${IMG_FRONTEND}"
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var-file=terraform.tfvars \
+            -var "backend_image=${IMG_BACKEND}" \
+            -var "frontend_image=${IMG_FRONTEND}"
