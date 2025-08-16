@@ -1,0 +1,322 @@
+---
+- name: "ResQPost: one-shot local CI (act) + cleanup"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    project_root: "{{ lookup('env','PWD') }}"
+    workflows_dir: "{{ project_root }}/.github/workflows"
+    workflow_file: "{{ workflows_dir }}/ci.yml"
+    logs_dir: "{{ project_root }}/logs"
+    act_workspace: "{{ logs_dir }}/.act_workspace"
+    actrc_path: "{{ act_workspace }}/.actrc"
+    actignore_path: "{{ act_workspace }}/.actignore"
+    db_container_name: "resqpost_db"
+    db_port_file: "{{ logs_dir }}/db_port"
+    default_db_port: 5432
+    pgdata_dir: "{{ project_root }}/.pgdata"
+
+  pre_tasks:
+    # Enhanced pre-cleanup to ensure ports are free
+    - name: Stop all PostgreSQL containers (cleanup before start)
+      ansible.builtin.shell: |
+        docker ps -q --filter "ancestor=postgres" | xargs -r docker stop
+        docker ps -aq --filter "ancestor=postgres" | xargs -r docker rm
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Kill processes using PostgreSQL ports (aggressive cleanup)
+      ansible.builtin.shell: |
+        # Kill processes on common PostgreSQL ports
+        for port in 5432 5433 5434; do
+          if command -v fuser >/dev/null 2>&1; then
+            fuser -k ${port}/tcp 2>/dev/null || true
+          elif command -v lsof >/dev/null 2>&1; then
+            lsof -ti tcp:${port} 2>/dev/null | xargs -r kill -9 || true
+          fi
+        done
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Wait for ports to be freed
+      ansible.builtin.pause:
+        seconds: 2
+
+    - name: Ensure .github/workflows exists
+      ansible.builtin.file:
+        path: "{{ workflows_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Ensure logs dir exists
+      ansible.builtin.file:
+        path: "{{ logs_dir }}"
+        state: directory
+        mode: "0755"
+
+  tasks:
+    - name: Write GitHub Actions workflow (with alternative port)
+      ansible.builtin.copy:
+        dest: "{{ workflow_file }}"
+        mode: "0644"
+        content: |
+          name: CI
+          on:
+            push:
+            pull_request:
+
+          jobs:
+            backend:
+              name: Backend (Python)
+              runs-on: ubuntu-latest
+              services:
+                postgres:
+                  image: postgres:15-alpine
+                  env:
+                    POSTGRES_DB: resqpost
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                  ports:
+                    - 5433:5432  # Use alternative port to avoid conflicts
+                  options: >-
+                    --health-cmd "pg_isready -U postgres -d resqpost"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 10
+              env:
+                DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5433/resqpost
+                PIP_DISABLE_PIP_VERSION_CHECK: 1
+                PYTHONDONTWRITEBYTECODE: 1
+              steps:
+                - uses: actions/checkout@v4
+                - name: Set up Python
+                  uses: actions/setup-python@v5
+                  with:
+                    python-version: "3.11"
+                    cache: "pip"
+                    cache-dependency-path: |
+                      backend/requirements.txt
+                      requirements.txt
+                - name: Install backend deps
+                  working-directory: backend
+                  run: |
+                    python -m pip install --upgrade pip
+                    if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+                
+                - name: Wait for PostgreSQL
+                  run: |
+                    timeout 30 bash -c 'until pg_isready -h localhost -p 5433 -U postgres; do sleep 1; done'
+                  env:
+                    PGPASSWORD: postgres
+                
+                - name: Create DB schema + smoke insert
+                  working-directory: backend
+                  run: |
+                    python - <<'PY'
+                    import os
+                    os.environ['DATABASE_URL'] = os.getenv('DATABASE_URL')
+                    from app import app, db
+                    with app.app_context():
+                        db.create_all()
+                        from models import Alert
+                        a = Alert(title='ci-smoke', description='ok', category='pet', location='nowhere')
+                        db.session.add(a); db.session.commit()
+                        c = db.session.query(Alert).count()
+                        print("[CI] Alerts in DB:", c)
+                    PY
+                - name: Lint (optional)
+                  if: ${{'{{'}} always() {{'}}'}}
+                  run: |
+                    python -m pip install ruff || true
+                    ruff check backend || true
+
+            frontend:
+              name: Frontend (Node 20)
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Set up Node
+                  uses: actions/setup-node@v4
+                  with:
+                    node-version: "20"
+                    cache: "npm"
+                    cache-dependency-path: frontend/package-lock.json
+                - name: Install
+                  working-directory: frontend
+                  run: |
+                    if [ -f package-lock.json ]; then npm ci; else npm install; fi
+                - name: Build
+                  working-directory: frontend
+                  env:
+                    REACT_APP_API_URL: http://localhost:5000
+                    CI: "false"
+                  run: npm run build
+
+    # ... (rest of your existing tasks remain the same)
+    
+    - name: Ensure act workspace dir exists
+      ansible.builtin.file:
+        path: "{{ act_workspace }}"
+        state: directory
+        mode: "0755"
+
+    - name: Rsync repo into act workspace excluding heavy/private dirs
+      ansible.builtin.shell: |
+        rsync -a --delete \
+          --exclude '.git' \
+          --exclude '.pgdata' \
+          --exclude 'logs' \
+          --exclude 'node_modules' \
+          --exclude 'frontend/node_modules' \
+          --exclude '**/__pycache__' \
+          "{{ project_root }}/" "{{ act_workspace }}/"
+      args: { executable: /bin/bash }
+
+    - name: Ensure workflow exists in act workspace
+      ansible.builtin.file:
+        path: "{{ act_workspace }}/.github/workflows"
+        state: directory
+        mode: "0755"
+
+    - name: Copy workflow into act workspace
+      ansible.builtin.copy:
+        src: "{{ workflow_file }}"
+        dest: "{{ act_workspace }}/.github/workflows/ci.yml"
+        mode: "0644"
+        remote_src: true
+
+    - name: Write .actrc (with network settings for service communication)
+      ansible.builtin.copy:
+        dest: "{{ actrc_path }}"
+        mode: "0644"
+        content: |
+          -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04
+          --container-architecture linux/amd64
+
+    - name: Write .actignore
+      ansible.builtin.copy:
+        dest: "{{ actignore_path }}"
+        mode: "0644"
+        content: |
+          .pgdata
+          logs
+          node_modules
+          frontend/node_modules
+          **/__pycache__
+
+    - name: Check Docker availability
+      ansible.builtin.shell: "docker version >/dev/null 2>&1"
+      args: { executable: /bin/bash }
+      register: docker_check
+      failed_when: docker_check.rc != 0
+      changed_when: false
+
+    - name: Install act locally (no sudo) if missing
+      ansible.builtin.shell: |
+        set -e
+        if command -v act >/dev/null 2>&1; then exit 0; fi
+        OS="$(uname -s)"; ARCH="$(uname -m)"
+        case "$OS" in Linux) os=Linux ;; Darwin) os=Darwin ;; *) echo "Unsupported OS: $OS"; exit 1 ;; esac
+        case "$ARCH" in x86_64|amd64) arch=x86_64 ;; arm64|aarch64) arch=arm64 ;; *) echo "Unsupported Arch: $ARCH"; exit 1 ;; esac
+        mkdir -p "$HOME/.local/bin"
+        url="https://github.com/nektos/act/releases/latest/download/act_${os}_${arch}.tar.gz"
+        tmp="$(mktemp -d)"; curl -fsSL "$url" -o "$tmp/act.tgz"; tar -xzf "$tmp/act.tgz" -C "$tmp"
+        install "$tmp/act" "$HOME/.local/bin/act"; rm -rf "$tmp"
+      args: { executable: /bin/bash }
+      changed_when: false
+
+    - name: Pull runner image (first run speedup)
+      ansible.builtin.shell: "docker pull ghcr.io/catthehacker/ubuntu:act-22.04"
+      args:
+        executable: /bin/bash
+        chdir: "{{ act_workspace }}"
+      changed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME }}/.local/bin:/usr/local/bin:{{ ansible_env.PATH }}"
+
+    - name: Run CI locally with act (push) from workspace - with host networking
+      ansible.builtin.shell: "act push --pull=false --container-daemon-socket /var/run/docker.sock --network host"
+      args:
+        executable: /bin/bash
+        chdir: "{{ act_workspace }}"
+      environment:
+        PATH: "{{ ansible_env.HOME }}/.local/bin:/usr/local/bin:{{ ansible_env.PATH }}"
+
+    # Enhanced cleanup section
+    - name: Stop backend if pid exists
+      ansible.builtin.shell: |
+        if [ -f "{{ logs_dir }}/backend.pid" ]; then
+          kill "$(cat '{{ logs_dir }}/backend.pid')" 2>/dev/null || true
+          rm -f "{{ logs_dir }}/backend.pid"
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Stop frontend if pid exists
+      ansible.builtin.shell: |
+        if [ -f "{{ logs_dir }}/frontend.pid" ]; then
+          kill "$(cat '{{ logs_dir }}/frontend.pid')" 2>/dev/null || true
+          rm -f "{{ logs_dir }}/frontend.pid"
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Cleanup all act containers
+      ansible.builtin.shell: |
+        # Stop and remove any act-related containers
+        docker ps -a | grep "act-" | awk '{print $1}' | xargs -r docker rm -f
+        # Clean up any dangling PostgreSQL containers
+        docker ps -aq --filter "ancestor=postgres:15-alpine" | xargs -r docker rm -f
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Read db_port file if present
+      ansible.builtin.stat:
+        path: "{{ db_port_file }}"
+      register: dbpf
+
+    - name: Slurp db_port
+      when: dbpf.stat.exists
+      ansible.builtin.slurp:
+        path: "{{ db_port_file }}"
+      register: dbpf_slurp
+
+    - name: Set db_port fact
+      ansible.builtin.set_fact:
+        db_port: "{{ (dbpf_slurp.content | b64decode | trim) if dbpf.stat.exists else default_db_port }}"
+
+    - name: Stop & remove DB container (ignore if missing)
+      ansible.builtin.shell: |
+        docker rm -f '{{ db_container_name }}' >/dev/null 2>&1 || true
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Comprehensive port cleanup
+      ansible.builtin.shell: |
+        # Clean up PostgreSQL ports
+        for PORT in 5432 5433 5434; do
+          if command -v fuser >/dev/null 2>&1; then
+            fuser -k ${PORT}/tcp 2>/dev/null || true
+          elif command -v lsof >/dev/null 2>&1; then
+            lsof -ti tcp:${PORT} -sTCP:LISTEN -P -n 2>/dev/null | xargs -r kill -9 || true
+          fi
+        done
+        
+        # Clean up app ports
+        for PORT in 5000 3000; do
+          if command -v fuser >/dev/null 2>&1; then
+            fuser -k ${PORT}/tcp 2>/dev/null || true
+          elif command -v lsof >/dev/null 2>&1; then
+            lsof -ti tcp:${PORT} -sTCP:LISTEN -P -n 2>/dev/null | xargs -r kill -9 || true
+          fi
+        done
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Done
+      ansible.builtin.debug:
+        msg:
+          - "[CI] act ran with host networking and alternative PostgreSQL port (5433)."
+          - "[Frontend] Artifact upload disabled (not supported in act)."
+          - "[Backend] PostgreSQL accessible via localhost:5433."
