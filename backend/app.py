@@ -189,8 +189,12 @@ def get_alerts():
         return jsonify({'success': True, 'alerts': payload, 'count': len(payload)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-
+    
+@app.route("/health")
+def health():
+    return {"status": "ok"}, 200
 @app.route('/api/alerts', methods=['POST'])
+
 def create_alert():
     try:
         data = request.form.to_dict()

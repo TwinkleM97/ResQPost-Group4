@@ -10,17 +10,14 @@ permissions:
   id-token: write
   actions: read
 
-# ---------- Global toggles + TF plugin cache ----------
+# global toggles
 env:
   STRICT_TESTS: 'false'
   ENABLE_DOCKER_PUSH: 'true'
   ENABLE_TF_PLAN: 'true'
   ENABLE_TF_APPLY: 'true'
-  # speeds up terraform init across jobs
-  TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
 
 jobs:
-  # ---------------- Code Scanning ----------------
   codeql:
     if: ${{ github.actor != 'nektos/act' }}
     name: Code Scanning (CodeQL)
@@ -33,19 +30,15 @@ jobs:
           languages: javascript, python
       - uses: github/codeql-action/analyze@v3
 
-  # ---------------- Build images ----------------
   build:
     name: Build images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Build backend image
         run: docker build -t resqpost-backend:ci ./backend
-
       - name: Build frontend image
         run: docker build -t resqpost-frontend:ci ./frontend
-
       - name: Save images as artifacts
         if: ${{ github.actor != 'nektos/act' }}
         run: |
@@ -58,7 +51,6 @@ jobs:
         if: ${{ github.actor != 'nektos/act' }}
         with: { name: frontend-image, path: frontend-image.tar.gz }
 
-  # ---------------- Trivy ----------------
   trivy-image:
     if: ${{ github.actor != 'nektos/act' }}
     name: Trivy Image Scan
@@ -69,12 +61,10 @@ jobs:
         with: { name: backend-image }
       - uses: actions/download-artifact@v4
         with: { name: frontend-image }
-
       - name: Load images
         run: |
           zcat backend-image.tar.gz | docker load
           zcat frontend-image.tar.gz | docker load
-
       - name: Scan backend image
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -83,7 +73,6 @@ jobs:
           output: trivy-backend.sarif
           ignore-unfixed: true
           vuln-type: os,library
-
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -92,20 +81,17 @@ jobs:
           output: trivy-frontend.sarif
           ignore-unfixed: true
           vuln-type: os,library
-
       - name: Upload SARIF (backend)
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-backend.sarif
           category: trivy-backend-image
-
       - name: Upload SARIF (frontend)
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend-image
 
-  # ---------------- Tests: backend ----------------
   test-backend:
     name: Test (backend) + coverage
     runs-on: ubuntu-latest
@@ -179,7 +165,6 @@ jobs:
         if: ${{ github.actor != 'nektos/act' }}
         with: { name: backend-summary, path: backend/backend-summary.txt }
 
-  # ---------------- Tests: frontend ----------------
   test-frontend:
     name: Test (frontend) + coverage
     runs-on: ubuntu-latest
@@ -206,14 +191,12 @@ jobs:
         if: ${{ github.actor != 'nektos/act' }}
         with: { name: frontend-coverage, path: frontend/coverage }
 
-  # ---------------- Infra validation ----------------
   validate-infra:
     name: Validate infra (if present)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate CloudFormation (if infra/cfn exists)
         shell: bash
         run: |
@@ -225,11 +208,9 @@ jobs:
           else
             echo "No infra/cfn directory; skipping CFN validation."
           fi
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.5.7 }
-
       - name: Terraform validate (if TF dir exists)
         shell: bash
         run: |
@@ -244,44 +225,36 @@ jobs:
             echo "No terraform dir; skipping terraform validate."
           fi
 
-  # ---------------- Integration (compose) ----------------
   integration:
     name: Integration (docker compose)
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend]
     steps:
       - uses: actions/checkout@v4
-
       - name: Ensure docker compose & curl
         run: |
           if ! docker compose version >/dev/null 2>&1; then
             sudo apt-get update && sudo apt-get install -y docker-compose-plugin
           fi
           command -v curl >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y curl)
-
-      - name: Download backend image
+      - uses: actions/download-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        uses: actions/download-artifact@v4
         with: { name: backend-image }
       - name: Load backend image
         if: ${{ github.actor != 'nektos/act' }}
         run: zcat backend-image.tar.gz | docker load
-
-      - name: Download frontend image
+      - uses: actions/download-artifact@v4
         if: ${{ github.actor != 'nektos/act' }}
-        uses: actions/download-artifact@v4
         with: { name: frontend-image }
       - name: Load frontend image
         if: ${{ github.actor != 'nektos/act' }}
         run: zcat frontend-image.tar.gz | docker load
-
       - name: Build backend image (act fallback)
         if: ${{ github.actor == 'nektos/act' }}
         run: docker build -t resqpost-backend:ci ./backend
       - name: Build frontend image (act fallback)
         if: ${{ github.actor == 'nektos/act' }}
         run: docker build -t resqpost-frontend:ci ./frontend
-
       - name: Write docker-compose.ci.yml
         run: |
           cat > docker-compose.ci.yml <<'YAML'
@@ -333,15 +306,12 @@ jobs:
                 timeout: 5s
                 retries: 24
           YAML
-
       - name: Up (start, detached)
         run: docker compose -f docker-compose.ci.yml up -d
-
       - name: Wait for Postgres healthy
         run: |
           set -e
           timeout 120 bash -c 'until docker compose -f docker-compose.ci.yml exec -T db pg_isready -U postgres -d resqpost; do echo "[wait] postgres..."; sleep 3; done'
-
       - name: Initialize DB schema
         run: |
           docker compose -f docker-compose.ci.yml exec -T backend python - <<'PY'
@@ -350,7 +320,6 @@ jobs:
               db.create_all()
               print("[ci] create_all done")
           PY
-
       - name: Smoke insert
         run: |
           docker compose -f docker-compose.ci.yml exec -T backend python - <<'PY'
@@ -361,7 +330,6 @@ jobs:
               db.session.add(a); db.session.commit()
               print("[ci] inserted one alert")
           PY
-
       - name: Wait for backend 200 /api/alerts
         run: |
           set -e
@@ -371,7 +339,6 @@ jobs:
             echo "[wait] backend..."; sleep 5
           done
           [ "$code" -eq 200 ] || (echo "Expected 200 got $code" && exit 1)
-
       - name: Wait for frontend 2xx /
         run: |
           set -e
@@ -381,12 +348,10 @@ jobs:
             echo "[wait] frontend..."; sleep 5
           done
           [[ "$code" -ge 200 && "$code" -lt 400 ]] || (echo "Expected 2xx got $code" && exit 1)
-
       - name: Teardown
         if: ${{ always() }}
         run: docker compose -f docker-compose.ci.yml down -v
 
-  # ---------------- Publish images (guarded via steps) ----------------
   publish-images:
     name: Push Docker images
     runs-on: ubuntu-latest
@@ -404,19 +369,16 @@ jobs:
         with: { name: backend-image }
       - uses: actions/download-artifact@v4
         with: { name: frontend-image }
-
       - name: Load images
         run: |
           zcat backend-image.tar.gz | docker load
           zcat frontend-image.tar.gz | docker load
-
       - name: Login to Docker Hub
         if: ${{ env.ENABLE_DOCKER_PUSH == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Tag & push
         if: ${{ env.ENABLE_DOCKER_PUSH == 'true' }}
         id: push
@@ -425,13 +387,12 @@ jobs:
           SHA_TAG="${GITHUB_SHA::12}"
           docker tag resqpost-backend:ci  "${REGISTRY}/${BACKEND_REPO}:${SHA_TAG}"
           docker tag resqpost-frontend:ci "${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}"
-          docker tag resqpost-backend:ci  "${REGISTRY}/${BACKEND_REPO}:latest"
+          docker tag resqpost-backend:ci  "${REGISTRY}/${BACKEND_REPO}:latest}"
           docker tag resqpost-frontend:ci "${REGISTRY}/${FRONTEND_REPO}:latest"
           docker push "${REGISTRY}/${BACKEND_REPO}:${SHA_TAG}"
           docker push "${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}"
           docker push "${REGISTRY}/${BACKEND_REPO}:latest"
           docker push "${REGISTRY}/${FRONTEND_REPO}:latest"
-
       - name: Set outputs
         id: out
         run: |
@@ -439,7 +400,6 @@ jobs:
           echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
-  # ---------------- Terraform PLAN (guarded via steps) ----------------
   terraform-plan:
     name: Terraform plan
     runs-on: ubuntu-latest
@@ -449,14 +409,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # set + cache plugin dir (no runner.* at workflow env)
+      - name: Set TF plugin cache dir
+        run: |
+          echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache" >> $GITHUB_ENV
+          mkdir -p "$HOME/.terraform.d/plugin-cache"
+
       - name: Cache TF plugins
         uses: actions/cache@v4
         with:
           path: ${{ env.TF_PLUGIN_CACHE_DIR }}
           key: ${{ runner.os }}-tf-${{ hashFiles('**/.terraform.lock.hcl') }}
-
-      - name: Show TF dir
-        run: ls -la "$TF_DIR" || true
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -468,6 +431,9 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Show TF dir
+        run: ls -la "$TF_DIR" || true
 
       - name: Create terraform.tfvars
         if: ${{ env.ENABLE_TF_PLAN == 'true' }}
@@ -500,7 +466,6 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform plan -input=false -var-file=terraform.tfvars
 
-  # ---------------- Terraform APPLY (guarded via steps) ----------------
   terraform-apply:
     name: Terraform apply (deploy)
     runs-on: ubuntu-latest
@@ -524,6 +489,12 @@ jobs:
           else
             echo "has_tf=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Set TF plugin cache dir
+        if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
+        run: |
+          echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache" >> $GITHUB_ENV
+          mkdir -p "$HOME/.terraform.d/plugin-cache"
 
       - name: Cache TF plugins
         if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
@@ -569,7 +540,6 @@ jobs:
         run: |
           set -e
           terraform init -input=false
-          # make a safe workspace name by removing '/' and '.'
           WS="$(echo '${{ github.ref_name }}' | tr -d '/.')"
           terraform workspace select "$WS" || terraform workspace new "$WS"
           echo "Using workspace: $WS"
