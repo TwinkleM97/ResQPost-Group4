@@ -542,6 +542,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Who am I?
+        run: aws sts get-caller-identity
 
       - name: Terraform init
         if: ${{ steps.probe.outputs.has_tf == 'true' }}
