@@ -462,6 +462,9 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region:     ${{ vars.AWS_REGION || 'us-east-1' }}
 
+      - name: Who am I?
+        run: aws sts get-caller-identity
+
       - name: Create terraform.tfvars
         if: ${{ env.ENABLE_TF_PLAN == 'true' }}
         working-directory: ${{ env.TF_DIR }}
