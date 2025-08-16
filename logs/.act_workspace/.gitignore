@@ -1,0 +1,25 @@
+# Node / React
+frontend/node_modules/
+frontend/build/
+frontend/.env
+*.log
+
+# Python
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+
+# Docker
+*.pid
+
+# OS / Editor
+.DS_Store
+.vscode/

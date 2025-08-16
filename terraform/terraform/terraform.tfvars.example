@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and fill in locally (DO NOT COMMIT terraform.tfvars)
+aws_region        = "us-east-1"
+allowed_ssh_cidr  = "0.0.0.0/0"
+key_name          = "resqpost-key"
+db_user           = "postgres"
+db_password       = "ChangeMe123!"  # supply via TF_VAR_db_password in CI
+bucket_name       = ""              # leave empty to autogenerate
+s3_public_read    = true
+backend_image     = "twinklem97/resqpost-backend:latest"
+frontend_image    = "twinklem97/resqpost-frontend:latest"
