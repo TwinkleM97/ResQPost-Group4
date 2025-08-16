@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
   security-events: write
-  id-token: write      # needed for AWS OIDC
+  id-token: write
   actions: read
 
 jobs:
@@ -26,6 +26,32 @@ jobs:
           languages: javascript, python
       - uses: github/codeql-action/analyze@v3
 
+  # ---------------- Build images ----------------
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t resqpost-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t resqpost-frontend:ci ./frontend
+
+      - name: Save images as artifacts
+        if: ${{ github.actor != 'nektos/act' }}
+        run: |
+          docker save resqpost-backend:ci | gzip > backend-image.tar.gz
+          docker save resqpost-frontend:ci | gzip > frontend-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: backend-image,  path: backend-image.tar.gz }
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.actor != 'nektos/act' }}
+        with: { name: frontend-image, path: frontend-image.tar.gz }
+
+  # ---------------- Trivy ----------------
   trivy-image:
     if: ${{ github.actor != 'nektos/act' }}
     name: Trivy Image Scan
@@ -60,41 +86,17 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
 
-      - name: Upload SARIF (backend image)
+      - name: Upload SARIF (backend)
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-backend.sarif
           category: trivy-backend-image
-      - name: Upload SARIF (frontend image)
+
+      - name: Upload SARIF (frontend)
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend-image
-
-  # ---------------- Build images ----------------
-  build:
-    name: Build images
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build backend image
-        run: docker build -t resqpost-backend:ci ./backend
-
-      - name: Build frontend image
-        run: docker build -t resqpost-frontend:ci ./frontend
-
-      - name: Save images as artifacts
-        if: ${{ github.actor != 'nektos/act' }}
-        run: |
-          docker save resqpost-backend:ci | gzip > backend-image.tar.gz
-          docker save resqpost-frontend:ci | gzip > frontend-image.tar.gz
-      - uses: actions/upload-artifact@v4
-        if: ${{ github.actor != 'nektos/act' }}
-        with: { name: backend-image,  path: backend-image.tar.gz }
-      - uses: actions/upload-artifact@v4
-        if: ${{ github.actor != 'nektos/act' }}
-        with: { name: frontend-image, path: frontend-image.tar.gz }
 
   # ---------------- Tests: backend ----------------
   test-backend:
@@ -221,14 +223,18 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.5.7 }
 
-      - name: Terraform validate (if infra/terraform exists)
+      - name: Terraform validate (if TF dir exists)
         shell: bash
         run: |
           set -e
-          if [ -d infra/terraform ]; then
-            (cd infra/terraform && terraform init -input=false && terraform validate)
+          TF_DIR=""
+          for d in "infra/terraform" "terraform"; do
+            if [ -d "$d" ]; then TF_DIR="$d"; break; fi
+          done
+          if [ -n "$TF_DIR" ]; then
+            (cd "$TF_DIR" && terraform init -input=false && terraform validate)
           else
-            echo "No infra/terraform; skipping Terraform validate."
+            echo "No terraform dir; skipping terraform validate."
           fi
 
   # ---------------- Integration (compose) ----------------
@@ -373,7 +379,7 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.ci.yml down -v
 
-  # ---------------- Publish images ----------------
+  # ---------------- Publish images (main only) ----------------
   publish-images:
     name: Push Docker images
     runs-on: ubuntu-latest
@@ -420,50 +426,52 @@ jobs:
           echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
-  # ---------------- Terraform PLAN on PRs ----------------
+  # ---------------- Terraform PLAN (push & PR) ----------------
   terraform-plan:
     name: Terraform plan
     runs-on: ubuntu-latest
     needs: [validate-infra]
-  # Run on both push and PR; actual TF steps still gated by the probe
     steps:
       - uses: actions/checkout@v4
 
-      - id: probe
-        name: Check if infra/terraform exists
+      - id: locate
+        name: Locate Terraform directory
         run: |
-          if [ -d infra/terraform ]; then
-            echo "has_tf=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tf=false" >> "$GITHUB_OUTPUT"
-          fi
+          for d in "infra/terraform" "terraform"; do
+            if [ -d "$d" ]; then
+              echo "tf_dir=$d" >> "$GITHUB_OUTPUT"
+              echo "Using TF dir: $d"
+              exit 0
+            fi
+          done
+          echo "tf_dir=" >> "$GITHUB_OUTPUT"
+          echo "No terraform dir found; skipping TF steps."
 
       - uses: hashicorp/setup-terraform@v3
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
         with: { terraform_version: 1.5.7 }
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ (vars.AWS_REGION != '' && vars.AWS_REGION) || 'us-east-1' }}
 
       - name: Terraform init
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
+        working-directory: ${{ steps.locate.outputs.tf_dir }}
         run: terraform init -input=false
 
       - name: Terraform plan
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
+        working-directory: ${{ steps.locate.outputs.tf_dir }}
         env:
           TF_VAR_backend_image: 'dry-run'
           TF_VAR_frontend_image: 'dry-run'
         run: terraform plan -input=false
 
-
-  # ---------------- Terraform APPLY on push to main ----------------
+  # ---------------- Terraform APPLY (main) ----------------
   terraform-apply:
     name: Terraform apply (deploy)
     runs-on: ubuntu-latest
@@ -478,36 +486,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - id: probe
-        name: Check if infra/terraform exists
+      - id: locate
+        name: Locate Terraform directory
         run: |
-          if [ -d infra/terraform ]; then
-            echo "has_tf=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tf=false" >> "$GITHUB_OUTPUT"
-          fi
+          for d in "infra/terraform" "terraform"; do
+            if [ -d "$d" ]; then
+              echo "tf_dir=$d" >> "$GITHUB_OUTPUT"
+              echo "Using TF dir: $d"
+              exit 0
+            fi
+          done
+          echo "tf_dir=" >> "$GITHUB_OUTPUT"
+          echo "No terraform dir found; skipping TF steps."
 
       - uses: hashicorp/setup-terraform@v3
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
         with: { terraform_version: 1.5.7 }
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ (vars.AWS_REGION != '' && vars.AWS_REGION) || 'us-east-1' }}
 
       - name: Terraform init
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
+        working-directory: ${{ steps.locate.outputs.tf_dir }}
         run: terraform init -input=false
 
       - name: Terraform apply
-        if: ${{ steps.probe.outputs.has_tf == 'true' }}
-        working-directory: infra/terraform
+        if: ${{ steps.locate.outputs.tf_dir != '' }}
+        working-directory: ${{ steps.locate.outputs.tf_dir }}
         run: |
           set -e
           terraform apply -auto-approve -input=false
-          # To force EC2 reprovision every deploy, uncomment:
+          # To force EC2 reprovision on every deploy, you could:
           # terraform apply -auto-approve -input=false -replace=aws_instance.app
