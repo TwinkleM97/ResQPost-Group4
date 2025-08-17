@@ -53,11 +53,18 @@ variable "key_name" {
 variable "backend_image" {
   description = "Backend image (e.g. twinklem97/resqpost-backend:latest)."
   type        = string
+  default     = ""      # <-- make optional
 }
 
 variable "frontend_image" {
   description = "Frontend image (e.g. twinklem97/resqpost-frontend:latest)."
   type        = string
+  default     = ""     
+}
+# Fallback to :latest on Docker Hub if CI doesn't pass an image
+locals {
+  backend_image_effective  = var.backend_image  != "" ? var.backend_image  : "docker.io/twinklem97/resqpost-backend:latest"
+  frontend_image_effective = var.frontend_image != "" ? var.frontend_image : "docker.io/twinklem97/resqpost-frontend:latest"
 }
 
 ############################
