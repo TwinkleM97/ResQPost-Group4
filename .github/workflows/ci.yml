@@ -740,6 +740,31 @@ jobs:
             terraform workspace new "$WS"
           fi
           echo "Using workspace: $WS"
+
+          
+      # Create tfvars in APPLY too (plan had it; apply needs it as well)
+      - name: Create terraform.tfvars
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          cat > terraform.tfvars <<'TFVARS'
+          aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
+          allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
+          db_user          = "${{ vars.DB_USER       || 'postgres' }}"
+          db_password      = "${{ secrets.DB_PASSWORD }}"
+          db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
+          create_bucket         = true
+          manage_bucket_policy  = true
+          s3_public_read        = true
+          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
+          log_retention_days    = 30
+          # placeholders; apply will override via -var for the images
+          backend_image    = "dry-run"
+          frontend_image   = "dry-run"
+          TFVARS
+          echo "--- terraform.tfvars ---"
+          sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
+
+
       - name: Import existing AWS resources (idempotent)
         working-directory: ${{ env.TF_DIR }}
         shell: bash
@@ -781,29 +806,6 @@ jobs:
           else
             echo "[absent] IAM role resqpost-ec2-role not found; will be created by apply"
           fi
-
-
-      # Create tfvars in APPLY too (plan had it; apply needs it as well)
-      - name: Create terraform.tfvars
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          cat > terraform.tfvars <<'TFVARS'
-          aws_region       = "${{ vars.AWS_REGION || 'us-east-1' }}"
-          allowed_ssh_cidr = "${{ vars.ALLOWED_SSH_CIDR || '0.0.0.0/0' }}"
-          db_user          = "${{ vars.DB_USER       || 'postgres' }}"
-          db_password      = "${{ secrets.DB_PASSWORD }}"
-          db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
-          create_bucket         = true
-          manage_bucket_policy  = true
-          s3_public_read        = true
-          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
-          log_retention_days    = 30
-          # placeholders; apply will override via -var for the images
-          backend_image    = "dry-run"
-          frontend_image   = "dry-run"
-          TFVARS
-          echo "--- terraform.tfvars ---"
-          sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
 
       - name: Show image refs for apply
         run: |
