@@ -543,12 +543,20 @@ jobs:
       - name: Terraform init + workspace (branch-scoped)
         if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
         working-directory: ${{ env.TF_DIR }}
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           terraform init -input=false
-          WS="$(echo '${{ github.ref_name }}' | tr '/.' '')"
+
+          # Start from branch name and keep only chars Terraform workspaces allow
+          RAW="${{ github.ref_name }}"
+          WS="$(printf '%s' "$RAW" | tr -cd '[:alnum:]_-')"
+          # Fallback in case it somehow becomes empty
+          [ -n "$WS" ] || WS="default"
+
           terraform workspace select "$WS" || terraform workspace new "$WS"
           echo "Using workspace: $WS"
+
 
       - name: Terraform apply
         if: ${{ steps.probe.outputs.has_tf == 'true' && env.ENABLE_TF_APPLY == 'true' }}
