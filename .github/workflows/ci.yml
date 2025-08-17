@@ -615,13 +615,13 @@ jobs:
           TFVARS
           echo "--- terraform.tfvars ---"
           sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
-            - name: Terraform init
-              working-directory: ${{ env.TF_DIR }}
-              run: terraform init -input=false
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
 
-            - name: Terraform plan
-              working-directory: ${{ env.TF_DIR }}
-              run: terraform plan -input=false -var-file=terraform.tfvars
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -input=false -var-file=terraform.tfvars
 
 
 # ---------------- Terraform APPLY (main only) ----------------
