@@ -245,6 +245,9 @@ resource "aws_instance" "app" {
 
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
+  user_data_replace_on_change = true
+
+
   user_data = templatefile("${path.module}/user-data.sh", {
     # DB in Docker
     db_user        = var.db_user
