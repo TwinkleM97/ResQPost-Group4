@@ -648,6 +648,17 @@ jobs:
       IMG_BACKEND:  ${{ needs.publish-images.outputs.backend_image }}
       IMG_FRONTEND: ${{ needs.publish-images.outputs.frontend_image }}
     steps:
+      - name: Debug needs
+        run: echo '${{ toJson(needs) }}'
+
+      - name: Require image tags
+        run: |
+          echo "IMG_BACKEND=${IMG_BACKEND}"
+          echo "IMG_FRONTEND=${IMG_FRONTEND}"
+          [ -n "${IMG_BACKEND}" ] && [ -n "${IMG_FRONTEND}" ] || {
+            echo "::error::Image tags missing. Check publish-images outputs."; exit 1;
+          }
+
       - uses: actions/checkout@v4
 
       - name: Setup Terraform
@@ -741,7 +752,7 @@ jobs:
           fi
           echo "Using workspace: $WS"
 
-          
+
       # Create tfvars in APPLY too (plan had it; apply needs it as well)
       - name: Create terraform.tfvars
         working-directory: ${{ env.TF_DIR }}
