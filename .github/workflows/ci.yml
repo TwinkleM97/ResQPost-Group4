@@ -690,6 +690,10 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region:     ${{ vars.TF_BACKEND_REGION || 'us-east-1' }}
+      - name: Debug AWS caller
+        run: |
+          aws sts get-caller-identity
+
 
       # Ensure S3 bucket + DynamoDB table for remote state (idempotent)
       - name: Ensure Terraform remote backend
