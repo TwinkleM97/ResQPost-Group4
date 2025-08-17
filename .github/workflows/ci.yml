@@ -406,9 +406,15 @@ jobs:
     outputs:
       backend_image:  ${{ steps.out.outputs.backend_image }}
       frontend_image: ${{ steps.out.outputs.frontend_image }}
-
+      pushed:         ${{ steps.dh.outputs.ok }}
     steps:
       # Pull the gz images produced in Build job (or you can rebuild; artifacts are faster)
+      - name: Echo outputs (debug)
+        run: |
+          echo "backend=${{ steps.out.outputs.backend_image }}"
+          echo "frontend=${{ steps.out.outputs.frontend_image }}"
+
+      
       - uses: actions/download-artifact@v4
         with: { name: backend-image }
       - uses: actions/download-artifact@v4
@@ -623,10 +629,6 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: grep -E '^(backend_image|frontend_image)\s*=' terraform.tfvars
 
-      - name: Terraform init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false
-
       - name: Terraform plan
         working-directory: ${{ env.TF_DIR }}
         run: terraform plan -input=false -var-file=terraform.tfvars
@@ -645,8 +647,8 @@ jobs:
       cancel-in-progress: false
     env:
       TF_DIR: terraform
-      IMG_BACKEND:  ${{ needs.publish-images.outputs.backend_image }}
-      IMG_FRONTEND: ${{ needs.publish-images.outputs.frontend_image }}
+      IMG_BACKEND:  ${{ needs['publish-images'].outputs.backend_image }}
+      IMG_FRONTEND: ${{ needs['publish-images'].outputs.frontend_image }}
     steps:
       - name: Debug needs
         run: echo '${{ toJson(needs) }}'
