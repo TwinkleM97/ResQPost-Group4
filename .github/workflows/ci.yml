@@ -740,6 +740,48 @@ jobs:
             terraform workspace new "$WS"
           fi
           echo "Using workspace: $WS"
+      - name: Import existing AWS resources (idempotent)
+        working-directory: ${{ env.TF_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          imp() {
+            local addr="$1" id="$2"
+            if terraform state show "$addr" >/dev/null 2>&1; then
+              echo "[state] already has $addr"
+            else
+              echo "[import] $addr <- $id"
+              terraform import -input=false "$addr" "$id" || {
+                echo "[warn] import failed for $addr (continuing)"; true;
+              }
+            fi
+          }
+
+          # CloudWatch Log Groups
+          for name in /resqpost/backend /resqpost/frontend /resqpost/postgres; do
+            found=$(aws logs describe-log-groups \
+                      --log-group-name-prefix "$name" \
+                      --query "logGroups[?logGroupName=='$name'] | length(@)" \
+                      --output text || echo 0)
+            if [ "${found:-0}" -ge 1 ]; then
+              case "$name" in
+                /resqpost/backend)  imp aws_cloudwatch_log_group.backend  "$name" ;;
+                /resqpost/frontend) imp aws_cloudwatch_log_group.frontend "$name" ;;
+                /resqpost/postgres) imp aws_cloudwatch_log_group.postgres "$name" ;;
+              esac
+            else
+              echo "[absent] $name not found in AWS; will be created by apply"
+            fi
+          done
+
+          # IAM Role
+          if aws iam get-role --role-name "resqpost-ec2-role" >/dev/null 2>&1; then
+            imp aws_iam_role.ec2_role "resqpost-ec2-role"
+          else
+            echo "[absent] IAM role resqpost-ec2-role not found; will be created by apply"
+          fi
+
 
       # Create tfvars in APPLY too (plan had it; apply needs it as well)
       - name: Create terraform.tfvars
