@@ -608,7 +608,7 @@ jobs:
           create_bucket         = true
           manage_bucket_policy  = true
           s3_public_read        = true
-          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
+          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3-g4' }}"
           log_retention_days    = 30
           # required module inputs (dummy values are fine for plan)
           backend_image    = "dry-run"
@@ -789,7 +789,7 @@ jobs:
           create_bucket         = true
           manage_bucket_policy  = true
           s3_public_read        = true
-          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
+          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3-g4' }}"
           log_retention_days    = 30
           # placeholders; apply will override via -var for the images
           backend_image    = "dry-run"
