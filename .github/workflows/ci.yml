@@ -607,26 +607,21 @@ jobs:
           db_user          = "${{ vars.DB_USER       || 'postgres' }}"
           db_password      = "${{ secrets.DB_PASSWORD }}"
           db_name          = "${{ vars.DB_NAME      || 'resqpost' }}"
-          # images: for plan, any placeholder is fine
-          backend_image    = "dry-run"
-          frontend_image   = "dry-run"
-          # optional S3 settings (safe defaults)
           create_bucket         = true
           manage_bucket_policy  = true
           s3_public_read        = true
-          bucket_name           = "${{ vars.BUCKET_NAME || 'resqpost-s3' }}"
+          bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
           log_retention_days    = 30
           TFVARS
           echo "--- terraform.tfvars ---"
           sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
+            - name: Terraform init
+              working-directory: ${{ env.TF_DIR }}
+              run: terraform init -input=false
 
-      - name: Terraform init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false
-
-      - name: Terraform plan
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -input=false -var-file=terraform.tfvars
+            - name: Terraform plan
+              working-directory: ${{ env.TF_DIR }}
+              run: terraform plan -input=false -var-file=terraform.tfvars
 
 
 # ---------------- Terraform APPLY (main only) ----------------
@@ -723,6 +718,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform apply -auto-approve -input=false \
+            -var-file=terraform.tfvars \
             -var "backend_image=${IMG_BACKEND}" \
             -var "frontend_image=${IMG_FRONTEND}"
 
