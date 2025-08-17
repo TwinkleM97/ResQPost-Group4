@@ -229,9 +229,10 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with: { terraform_version: 1.5.7 }
+        with:
+          terraform_version: 1.5.7
 
-      - name: Terraform validate (if TF dir exists)
+      - name: Terraform validate (no backend)
         shell: bash
         run: |
           set -e
@@ -240,7 +241,7 @@ jobs:
             if [ -d "$d" ]; then TF_DIR="$d"; break; fi
           done
           if [ -n "$TF_DIR" ]; then
-            (cd "$TF_DIR" && terraform init -input=false && terraform validate)
+            (cd "$TF_DIR" && terraform init -input=false -backend=false && terraform validate)
           else
             echo "No terraform dir; skipping terraform validate."
           fi
