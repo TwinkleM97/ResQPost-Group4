@@ -393,7 +393,6 @@ jobs:
     name: Push Docker images (any branch)
     runs-on: ubuntu-latest
     needs: [integration]
-    continue-on-error: false
     env:
       REGISTRY: docker.io
       BACKEND_REPO:  ${{ (vars.DOCKER_REPO_BACKEND  && vars.DOCKER_REPO_BACKEND)  || 'twinklem97/resqpost-backend' }}
@@ -413,11 +412,9 @@ jobs:
           zcat backend-image.tar.gz   | docker load
           zcat frontend-image.tar.gz | docker load
 
-      - name: Compute tags
+      - name: Compute tags (optional)
         id: tags
-        shell: bash
         run: |
-          set -euo pipefail
           BRANCH="${GITHUB_REF_NAME}"
           BR_TAG="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/@ ' '___' | cut -c1-120)"
           SHA_TAG="${GITHUB_SHA::12}"
@@ -437,7 +434,6 @@ jobs:
           fi
 
       - name: Login to Docker Hub
-        id: dlogin
         if: ${{ steps.dh.outputs.ok == 'true' }}
         uses: docker/login-action@v3
         with:
@@ -446,29 +442,41 @@ jobs:
 
       - name: Tag images
         run: |
-          docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
-          docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
+          SHA_TAG="${GITHUB_SHA::12}"
+          docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}"
+          docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}"
           docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:latest"
           docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:latest"
 
       - name: Push images (if logged in)
-        if: ${{ steps.dlogin.outcome == 'success' }}
+        if: ${{ steps.dh.outputs.ok == 'true' }}
         run: |
           set -e
-          docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
+          SHA_TAG="${GITHUB_SHA::12}"
+          docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}"
           docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:latest"
-          docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
+          docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}"
           docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:latest"
 
+      # ✅ Set job outputs here (compute SHA locally; no dependency on other step outputs)
       - name: Set outputs
         id: out
         run: |
-          echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}" >> "$GITHUB_OUTPUT"
+          SHA_TAG="${GITHUB_SHA::12}"
+          echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${SHA_TAG}"   >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${SHA_TAG}" >> "$GITHUB_OUTPUT"
+
+      # Also drop an artifact fallback
+      - name: Write images.env
+        run: |
+          echo "IMG_BACKEND=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${GITHUB_SHA::12}"   >  images.env
+          echo "IMG_FRONTEND=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${GITHUB_SHA::12}" >> images.env
+      - uses: actions/upload-artifact@v4
+        with: { name: image-refs, path: images.env }
 
       - name: Echo outputs (debug)
         run: |
@@ -637,14 +645,39 @@ jobs:
       - name: Debug needs
         run: echo '${{ toJson(needs) }}'
 
+      - name: 'Fallback: load IMG_* from artifact or recompute'
+        shell: bash
+        env:
+          REGISTRY: docker.io
+          BACKEND_REPO:  ${{ (vars.DOCKER_REPO_BACKEND  && vars.DOCKER_REPO_BACKEND)  || 'twinklem97/resqpost-backend' }}
+          FRONTEND_REPO: ${{ (vars.DOCKER_REPO_FRONTEND && vars.DOCKER_REPO_FRONTEND) || 'twinklem97/resqpost-frontend' }}
+        run: |
+          if [ -z "${IMG_BACKEND}" ] || [ -z "${IMG_FRONTEND}" ]; then
+            if [ -f images.env ]; then
+              # images.env should contain lines like IMG_BACKEND=... IMG_FRONTEND=...
+              source images.env
+              echo "IMG_BACKEND=${IMG_BACKEND}"   >> "$GITHUB_ENV"
+              echo "IMG_FRONTEND=${IMG_FRONTEND}" >> "$GITHUB_ENV"
+              echo "[fallback] loaded from artifact"
+            else
+              SHA_TAG="${GITHUB_SHA::12}"
+              echo "IMG_BACKEND=${REGISTRY}/${BACKEND_REPO}:${SHA_TAG}"   >> "$GITHUB_ENV"
+              echo "IMG_FRONTEND=${REGISTRY}/${FRONTEND_REPO}:${SHA_TAG}" >> "$GITHUB_ENV"
+              echo "[fallback] computed from SHA"
+            fi
+          fi
+          echo "IMG_BACKEND=${IMG_BACKEND}"
+          echo "IMG_FRONTEND=${IMG_FRONTEND}"
+
       - name: Require image tags
+        shell: bash
         run: |
           echo "IMG_BACKEND=${IMG_BACKEND}"
           echo "IMG_FRONTEND=${IMG_FRONTEND}"
           [ -n "${IMG_BACKEND}" ] && [ -n "${IMG_FRONTEND}" ] || {
             echo "::error::Image tags missing. Check publish-images outputs."; exit 1;
           }
-
+            
       - uses: actions/checkout@v4
 
       - name: Setup Terraform
