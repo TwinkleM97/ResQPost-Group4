@@ -18,13 +18,13 @@ CW_LOGS_FRONTEND="${cw_logs_frontend}"
 CW_LOGS_POSTGRES="${cw_logs_postgres}"
 # ----------------------------------------------------
 
-# --- Install Docker (Amazon Linux 2023) + python3 for URL encoding ---
+# --- Install Docker (Amazon Linux 2023) ---
 if command -v dnf >/dev/null 2>&1; then
   dnf -y update
-  dnf -y install docker python3
+  dnf -y install docker
 else
   yum -y update || true
-  yum -y install docker python3 || true
+  yum -y install docker || true
 fi
 systemctl enable --now docker
 usermod -aG docker ec2-user || true
@@ -32,16 +32,8 @@ usermod -aG docker ec2-user || true
 # --- App network & persistent dirs ---
 docker network create resqpost-net || true
 docker volume create resqpost_pgdata || true
-mkdir -p /opt/resqpost/uploads /opt/resqpost/nginx
+mkdir -p /opt/resqpost/uploads
 chmod 777 /opt/resqpost/uploads
-
-# --- Safe image fallbacks (in case TF didn’t pass them for any reason) ---
-if [ -z "${BACKEND_IMAGE:-}" ]; then
-  BACKEND_IMAGE="docker.io/twinklem97/resqpost-backend:latest"
-fi
-if [ -z "${FRONTEND_IMAGE:-}" ]; then
-  FRONTEND_IMAGE="docker.io/twinklem97/resqpost-frontend:latest"
-fi
 
 # --- Start Postgres (container) ---
 docker rm -f resqpost-db 2>/dev/null || true
@@ -62,8 +54,8 @@ docker run -d --name resqpost-db \
 
 # Wait for DB healthy
 echo "[BOOT] Waiting for Postgres to become healthy..."
-for i in $(seq 1 60); do
-  status="$(docker inspect -f '{{.State.Health.Status}}' resqpost-db 2>/dev/null || echo starting)"
+for i in $$(seq 1 60); do
+  status="$$(docker inspect -f '{{{{.State.Health.Status}}}}' resqpost-db 2>/dev/null || echo starting)"
   if [ "$status" = "healthy" ]; then
     echo "[BOOT] Postgres is healthy."
     break
@@ -106,47 +98,55 @@ docker run -d --name resqpost-backend \
   gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 \
     --access-logfile - --error-logfile - --log-level info app:app
 
-# --- Frontend Nginx base config (no uploads redirect here) ---
-# The /uploads redirect is injected conditionally below if a bucket is set.
-cat >/opt/resqpost/nginx/default.conf <<'NGX'
+# --- Frontend Nginx config with S3 redirect ---
+mkdir -p /opt/resqpost/nginx
+if [ "$AWS_REGION" = "us-east-1" ]; then
+  S3_HOST="$S3_BUCKET.s3.amazonaws.com"
+else
+  S3_HOST="$S3_BUCKET.s3.$AWS_REGION.amazonaws.com"
+fi
+
+cat >/opt/resqpost/nginx/default.conf <<NGX
 server {
   listen 80;
   root /usr/share/nginx/html;
-
   client_max_body_size 25m;
   access_log /dev/stdout;
   error_log  /dev/stderr notice;
 
   location / {
     index index.html index.htm;
-    try_files $uri $uri/ /index.html;
+    try_files \$uri \$uri/ /index.html;
   }
 
-  # Proxy API to the backend container by its network alias
   location ^~ /api/ {
     proxy_pass http://backend:5000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
     proxy_redirect off;
   }
 
-  # Static cache hints
-  location ~* \.(?:js|css)$ {
-    add_header Cache-Control "public, max-age=0, must-revalidate";
-    try_files $uri =404;
+  # redirect images served from /uploads/* to S3
+  location ^~ /uploads/ {
+    return 302 https://$S3_HOST\$uri;
   }
-  location ~* \.(?:png|jpg|jpeg|gif|ico|svg|webp|avif)$ {
+
+  location ~* \.(?:js|css)\$ {
+    add_header Cache-Control "public, max-age=0, must-revalidate";
+    try_files \$uri =404;
+  }
+  location ~* \.(?:png|jpg|jpeg|gif|ico|svg|webp|avif)\$ {
     expires 1y;
     add_header Cache-Control "public, immutable";
-    try_files $uri =404;
+    try_files \$uri =404;
   }
   location = /index.html { add_header Cache-Control "no-store" always; }
 }
 NGX
 
-# --- Frontend container ---
+# Run frontend with the mounted config
 docker pull "$FRONTEND_IMAGE" || true
 docker rm -f resqpost-frontend 2>/dev/null || true
 docker run -d --name resqpost-frontend \
@@ -160,21 +160,19 @@ docker run -d --name resqpost-frontend \
   --restart unless-stopped \
   "$FRONTEND_IMAGE"
 
-# --- Optional S3 redirect for /uploads (only if bucket is set) ---
-if [ -n "${S3_BUCKET:-}" ]; then
+# If bucket is set, also drop a small include to ensure redirect exists (defense in depth)
+if [ -n "$S3_BUCKET" ]; then
   if [ "$AWS_REGION" = "us-east-1" ]; then
     S3_HOST="$S3_BUCKET.s3.amazonaws.com"
   else
     S3_HOST="$S3_BUCKET.s3.$AWS_REGION.amazonaws.com"
   fi
 
-  # NOTE: $S3_HOST is expanded by this shell; $uri stays literal for Nginx.
-  docker exec -i resqpost-frontend sh -lc "cat > /etc/nginx/conf.d/s3-uploads.conf" <<NGX
+  cat >/etc/nginx/conf.d/s3-uploads.conf <<NGX
 location ^~ /uploads/ {
   return 302 https://$S3_HOST\$uri;
 }
 NGX
-
   docker exec resqpost-frontend nginx -s reload || docker exec resqpost-frontend kill -HUP 1 || true
 fi
 
