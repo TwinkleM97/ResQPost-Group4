@@ -484,7 +484,9 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform plan -input=false -var-file=terraform.tfvars
 
-  # ---------------- Terraform APPLY ----------------
+  # ---------------- Terraform APPLY ---------------
+  
+  # ----------------
   terraform-apply:
     name: Terraform apply (deploy)
     runs-on: ubuntu-latest
@@ -566,3 +568,4 @@ jobs:
             -var-file=terraform.tfvars \
             -var "backend_image=${IMG_BACKEND}" \
             -var "frontend_image=${IMG_FRONTEND}"
+
