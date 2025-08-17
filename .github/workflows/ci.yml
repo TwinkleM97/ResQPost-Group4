@@ -612,9 +612,17 @@ jobs:
           s3_public_read        = true
           bucket_name           = "${{ (vars.BUCKET_NAME && vars.BUCKET_NAME) || 'resqpost-s3' }}"
           log_retention_days    = 30
+          # required module inputs (dummy values are fine for plan)
+          backend_image    = "dry-run"
+          frontend_image   = "dry-run"
           TFVARS
           echo "--- terraform.tfvars ---"
           sed 's/db_password = .*/db_password = "***"/' terraform.tfvars
+
+      - name: Show required vars present
+        working-directory: ${{ env.TF_DIR }}
+        run: grep -E '^(backend_image|frontend_image)\s*=' terraform.tfvars
+
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -input=false
@@ -622,6 +630,7 @@ jobs:
       - name: Terraform plan
         working-directory: ${{ env.TF_DIR }}
         run: terraform plan -input=false -var-file=terraform.tfvars
+
 
 
 # ---------------- Terraform APPLY (main only) ----------------
