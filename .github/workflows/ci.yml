@@ -388,33 +388,21 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.ci.yml down -v
 
-  # ---------------- Publish images (main only) ----------------
+# ---------------- Publish images (any branch) ----------------
   publish-images:
     name: Push Docker images (any branch)
     runs-on: ubuntu-latest
-    # run after images are proven to work in compose; include trivy if you want
     needs: [integration]
-    # always run (not just on main / not only when PR), but don't fail the whole pipeline if push is skipped
     continue-on-error: false
-
     env:
       REGISTRY: docker.io
-      # allow overriding repos via repo Variables; fallback to your DockerHub repos
       BACKEND_REPO:  ${{ (vars.DOCKER_REPO_BACKEND  && vars.DOCKER_REPO_BACKEND)  || 'twinklem97/resqpost-backend' }}
       FRONTEND_REPO: ${{ (vars.DOCKER_REPO_FRONTEND && vars.DOCKER_REPO_FRONTEND) || 'twinklem97/resqpost-frontend' }}
-
     outputs:
       backend_image:  ${{ steps.out.outputs.backend_image }}
       frontend_image: ${{ steps.out.outputs.frontend_image }}
       pushed:         ${{ steps.dh.outputs.ok }}
     steps:
-      # Pull the gz images produced in Build job (or you can rebuild; artifacts are faster)
-      - name: Echo outputs (debug)
-        run: |
-          echo "backend=${{ steps.out.outputs.backend_image }}"
-          echo "frontend=${{ steps.out.outputs.frontend_image }}"
-
-      
       - uses: actions/download-artifact@v4
         with: { name: backend-image }
       - uses: actions/download-artifact@v4
@@ -422,23 +410,20 @@ jobs:
 
       - name: Load images
         run: |
-          zcat backend-image.tar.gz | docker load
+          zcat backend-image.tar.gz   | docker load
           zcat frontend-image.tar.gz | docker load
 
-      # Compute tags: sha + branch-latest (sanitized)
       - name: Compute tags
         id: tags
         shell: bash
         run: |
           set -euo pipefail
           BRANCH="${GITHUB_REF_NAME}"
-          # sanitize branch for a Docker tag
           BR_TAG="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr '/@ ' '___' | cut -c1-120)"
           SHA_TAG="${GITHUB_SHA::12}"
           echo "branch_tag=$BR_TAG" >> "$GITHUB_OUTPUT"
           echo "sha_tag=$SHA_TAG"   >> "$GITHUB_OUTPUT"
 
-      # Log in only if creds exist; otherwise we still set outputs but skip push
       - name: Check DockerHub creds
         id: dh
         env:
@@ -463,11 +448,8 @@ jobs:
         run: |
           docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
           docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
-
           docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
-
-          # Optional: unified "latest" per branch; comment out if you only want main to own :latest
           docker tag resqpost-backend:ci  "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:latest"
           docker tag resqpost-frontend:ci "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:latest"
 
@@ -478,18 +460,20 @@ jobs:
           docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:latest"
-
           docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.branch_tag }}"
           docker push "${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:latest"
 
-      # Always emit outputs so downstream (terraform-apply) has image refs,
-      # even if push was skipped; those refs point to what WOULD be pushed.
       - name: Set outputs
         id: out
         run: |
           echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_REPO }}:${{ steps.tags.outputs.sha_tag }}" >> "$GITHUB_OUTPUT"
           echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_REPO }}:${{ steps.tags.outputs.sha_tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Echo outputs (debug)
+        run: |
+          echo "backend=${{ steps.out.outputs.backend_image }}"
+          echo "frontend=${{ steps.out.outputs.frontend_image }}"
 
 # ---------------- Terraform PLAN ----------------
   terraform-plan:
