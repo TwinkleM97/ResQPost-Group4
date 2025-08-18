@@ -1,0 +1,94 @@
+---
+- name: "ResQPost DOWN"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    project_root: "{{ lookup('env','PWD') }}"
+    logs_dir: "{{ project_root }}/logs"
+    db_container_name: "resqpost_db"
+    db_port_file: "{{ logs_dir }}/db_port"
+    default_db_port: 5432
+    remove_pgdata: false
+    pgdata_dir: "{{ project_root }}/.pgdata"
+
+  tasks:
+    - name: Stop backend if pid exists
+      ansible.builtin.shell: |
+        if [ -f "{{ logs_dir }}/backend.pid" ]; then
+          kill "$(cat '{{ logs_dir }}/backend.pid')" 2>/dev/null || true
+          rm -f "{{ logs_dir }}/backend.pid"
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Stop frontend if pid exists
+      ansible.builtin.shell: |
+        if [ -f "{{ logs_dir }}/frontend.pid" ]; then
+          kill "$(cat '{{ logs_dir }}/frontend.pid')" 2>/dev/null || true
+          rm -f "{{ logs_dir }}/frontend.pid"
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Check if db_port file exists
+      ansible.builtin.stat:
+        path: "{{ db_port_file }}"
+      register: dbpf
+
+    - name: Read db_port from file
+      when: dbpf.stat.exists
+      ansible.builtin.slurp:
+        path: "{{ db_port_file }}"
+      register: dbpf_slurp
+
+    - name: Set db_port fact
+      ansible.builtin.set_fact:
+        db_port: "{{ (dbpf_slurp.content | b64decode | trim) if dbpf.stat.exists else default_db_port }}"
+
+    - name: Stop & remove DB container (ignore if missing)
+      ansible.builtin.shell: |
+        docker rm -f '{{ db_container_name }}' >/dev/null 2>&1 || true
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Free DB port {{ db_port }} (force kill)
+      ansible.builtin.shell: |
+        PORT="{{ db_port }}"
+        if command -v fuser >/dev/null 2>&1; then
+          fuser -k ${PORT}/tcp || true
+        fi
+        if command -v lsof >/dev/null 2>&1; then
+          lsof -ti tcp:${PORT} -sTCP:LISTEN -P -n | xargs -r kill -9 || true
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Free app ports 5000 and 3000 (best effort)
+      ansible.builtin.shell: |
+        if command -v fuser >/dev/null 2>&1; then
+          fuser -k 5000/tcp 3000/tcp || true
+        fi
+        if command -v lsof >/dev/null 2>&1; then
+          lsof -ti tcp:5000,tcp:3000 -sTCP:LISTEN -P -n | xargs -r kill -9 || true
+        fi
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Remove db_port file if present
+      when: dbpf.stat.exists
+      ansible.builtin.file:
+        path: "{{ db_port_file }}"
+        state: absent
+
+    - name: Remove .pgdata (local DB volume)
+      when: remove_pgdata
+      ansible.builtin.file:
+        path: "{{ pgdata_dir }}"
+        state: absent
+
+    - name: Confirm stopped
+      ansible.builtin.debug:
+        msg:
+          - "[OK] App stopped. Containers, PIDs, and DB port {{ db_port }} freed."

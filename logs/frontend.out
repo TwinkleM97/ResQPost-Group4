@@ -1,0 +1,97 @@
+ INFO  Accepting connections at http://localhost:3000
+ HTTP  8/13/2025 10:41:01 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:41:01 PM ::1 Returned 304 in 32 ms
+ HTTP  8/13/2025 10:41:01 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:01 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:01 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:01 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:01 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:01 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:03 PM ::1 GET /
+ HTTP  8/13/2025 10:41:03 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:03 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:03 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:03 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:03 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:03 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:03 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:35 PM ::1 GET /map
+ HTTP  8/13/2025 10:41:35 PM ::1 Returned 304 in 3 ms
+ HTTP  8/13/2025 10:41:35 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:35 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:35 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:35 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:35 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:35 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:39 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:41:39 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:39 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:39 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:39 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:39 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:39 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:39 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:41 PM ::1 GET /alert/e0eb1de2-af0e-4b0d-af8c-3dc44295a3d1
+ HTTP  8/13/2025 10:41:41 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:41 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:41 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:41 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:41:41 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:41 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:41 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:44 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:41:44 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:41:44 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:44 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:44 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:44 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:44 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:44 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:47 PM ::1 GET /post-alert
+ HTTP  8/13/2025 10:41:47 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:47 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:41:47 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:41:47 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:41:47 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:41:47 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:41:47 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:02 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:42:02 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:02 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:42:02 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:42:02 PM ::1 Returned 304 in 2 ms
+ HTTP  8/13/2025 10:42:02 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:02 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:42:02 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:19 PM ::1 GET /alert/e0eb1de2-af0e-4b0d-af8c-3dc44295a3d1
+ HTTP  8/13/2025 10:42:19 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:19 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:42:19 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:42:19 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:19 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:19 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:42:19 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /alert/80518664-6889-4506-b5d7-9a864523a9dc
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 200 in 1 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:42:40 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:42:40 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:42:54 PM ::1 GET /alerts
+ HTTP  8/13/2025 10:42:54 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:54 PM ::1 GET /static/js/main.9bf3bf1f.js
+ HTTP  8/13/2025 10:42:54 PM ::1 GET /static/css/main.18253ad6.css
+ HTTP  8/13/2025 10:42:54 PM ::1 Returned 304 in 1 ms
+ HTTP  8/13/2025 10:42:54 PM ::1 Returned 304 in 0 ms
+ HTTP  8/13/2025 10:42:54 PM ::1 GET /favicon.ico
+ HTTP  8/13/2025 10:42:54 PM ::1 Returned 304 in 1 ms

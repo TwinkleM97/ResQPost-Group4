@@ -1,0 +1,58 @@
+# ---------- Node / React ----------
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# ---------- Python ----------
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/.pytest_cache/
+backend/.coverage
+
+# ---------- Terraform ----------
+terraform/.terraform/             # provider cache
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+
+# Vars (keep real values locally only; commit an example file)
+terraform.tfvars
+*.auto.tfvars
+
+# Overrides (local only)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Do NOT ignore terraform/.terraform.lock.hcl (commit this file!)
+# (remove any existing rule that ignores it)
+
+# ---------- Secrets / Keys ----------
+*.pem
+*.key
+*.p12
+*.crt
+*.csr
+
+# ---------- Docker ----------
+*.pid
+
+# ---------- OS / Editor ----------
+.DS_Store
+.vscode/
+.pgdata/
+
+# ---------- Common root ignores ----------
+.venv/
+node_modules/
+*.log
+.env
+
+# Ignore ALL Terraform plugin caches
+**/.terraform/

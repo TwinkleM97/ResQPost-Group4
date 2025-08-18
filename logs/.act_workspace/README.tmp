@@ -1,0 +1,68 @@
+RESQPOST/
+├── backend/
+│   ├── app.py                 # Flask main application
+│   ├── models.py              # SQLAlchemy models
+│   ├── requirements.txt       # Python dependencies
+│   ├── Dockerfile            # Backend Docker configuration
+│   ├── .env.example          # Environment variables template
+│   └── venv/                 # Python virtual environment
+├── frontend/
+│   ├── public/
+│   │   ├── index.html        # Main HTML template
+│   │   └── favicon.ico       # App icon
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── AlertDetail.js    # Alert details page
+│   │   │   ├── AlertForm.js      # Submit alert form
+│   │   │   ├── AlertList.js      # List all alerts
+│   │   │   ├── MapView.js        # Map view with pins
+│   │   │   └── Home.js           # Landing page
+│   │   ├── App.js            # Main React component
+│   │   ├── index.js          # React entry point
+│   │   └── App.css           # Global styles
+│   ├── package.json          # NPM dependencies
+│   ├── package-lock.json     # NPM lock file
+│   └── Dockerfile           # Frontend Docker configuration
+├── docker-compose.yml        # Multi-container setup
+├── terraform/               # Infrastructure as Code
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml        # GitHub Actions pipeline
+└── README.md               # Project documentation
+
+## Quickstart (Local & Docker)
+
+### Local Development (no Docker)
+```bash
+./scripts/dev_up.sh      # start Flask (5000) + React (3000)
+./scripts/dev_down.sh    # stop both
+```
+
+### Docker Compose
+```bash
+./scripts/docker_up.sh   # build and run containers
+./scripts/docker_down.sh # stop and remove volumes
+```
+
+### Tests & Lint
+```bash
+./scripts/test.sh
+./scripts/lint.sh
+```
+
+### Terraform (IaC)
+```bash
+./scripts/tf.sh init
+./scripts/tf.sh plan
+./scripts/tf.sh apply
+./scripts/tf.sh destroy
+```
+
+### Trigger CI/CD (GitHub Actions)
+```bash
+export GITHUB_TOKEN=ghp_yourPAT
+./scripts/trigger_workflow.sh TwinkleM97 ResQPost ci-cd.yml main
+```

@@ -1,0 +1,265 @@
+---
+- name: "ResQPost UP (hybrid: host app + dockerized DB)"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    project_root: "{{ lookup('env','PWD') }}"
+    backend_dir: "{{ project_root }}/backend"
+    frontend_dir: "{{ project_root }}/frontend"
+    logs_dir: "{{ project_root }}/logs"
+    venv_dir: "{{ project_root }}/.venv"
+
+    node_version: "20"
+
+    # ---- DB (dockerized Postgres) ----
+    use_docker_db: true
+    db_container_name: "resqpost_db"
+    db_image: "postgres:15-alpine"
+
+    # Preferred/default; we'll auto-pick if busy
+    db_port_default: 5432
+    db_port_candidates: [5432, 5433, 5434, 5435, 55432]
+    db_port_file: "{{ logs_dir }}/db_port"
+
+    db_user: "postgres"
+    db_password: "password"
+    db_name: "resqpost"
+
+    # SQLite fallback (unused when docker DB enabled)
+    sqlite_url_abs: "sqlite:////{{ backend_dir }}/resqpost.db"
+
+  pre_tasks:
+    - name: Ensure logs dir exists
+      ansible.builtin.file:
+        path: "{{ logs_dir }}"
+        state: directory
+
+  tasks:
+    ###########################################################################
+    # Python env + deps
+    ###########################################################################
+    - name: Create Python virtualenv (if missing)
+      ansible.builtin.command: "python3 -m venv {{ venv_dir }}"
+      args:
+        creates: "{{ venv_dir }}/bin/activate"
+
+    - name: Upgrade pip/setuptools/wheel
+      ansible.builtin.shell: |
+        set -e
+        . "{{ venv_dir }}/bin/activate"
+        python -m pip install -U pip setuptools wheel
+      args: { executable: /bin/bash }
+
+    - name: Install backend requirements if present
+      ansible.builtin.shell: |
+        set -e
+        . "{{ venv_dir }}/bin/activate"
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        elif [ -f backend/requirements.txt ]; then
+          pip install -r backend/requirements.txt
+        fi
+      args:
+        chdir: "{{ project_root }}"
+        executable: /bin/bash
+
+    ###########################################################################
+    # Database (single Docker container, no compose)
+    ###########################################################################
+    - name: Check Docker availability
+      ansible.builtin.shell: "docker version >/dev/null 2>&1"
+      args: { executable: /bin/bash }
+      register: docker_check
+      failed_when: use_docker_db and docker_check.rc != 0
+      changed_when: false
+
+    # Reuse previously chosen port if present, else pick a free one
+    - name: Check if db_port file exists
+      when: use_docker_db
+      ansible.builtin.stat:
+        path: "{{ db_port_file }}"
+      register: dbpf
+
+    - name: Read db_port from file
+      when: use_docker_db and dbpf.stat.exists
+      ansible.builtin.slurp:
+        path: "{{ db_port_file }}"
+      register: dbpf_slurp
+
+    - name: Set db_port_effective from file (if present)
+      when: use_docker_db and dbpf.stat.exists
+      ansible.builtin.set_fact:
+        db_port_effective: "{{ dbpf_slurp.content | b64decode | trim }}"
+
+    - name: Prepare candidate ports string
+      when: use_docker_db and not dbpf.stat.exists
+      ansible.builtin.set_fact:
+        db_port_candidates_str: "{{ db_port_candidates | map('string') | join(' ') }}"
+
+    - name: Pick a free host port for Postgres (if none recorded)
+      when: use_docker_db and not dbpf.stat.exists
+      ansible.builtin.shell: >
+        set -e;
+        for p in $CANDS; do
+          if command -v ss >/dev/null 2>&1; then
+            if ss -ltn sport = :$p | grep -q LISTEN; then
+              continue;
+            fi;
+          elif command -v lsof >/dev/null 2>&1; then
+            if lsof -iTCP:$p -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+              continue;
+            fi;
+          else
+            if (echo >/dev/tcp/127.0.0.1/$p) >/dev/null 2>&1; then
+              continue;
+            fi;
+          fi;
+          echo "$p";
+          exit 0;
+        done;
+        echo "$DEFAULT_PORT"
+      args:
+        executable: /bin/bash
+      environment:
+        CANDS: "{{ db_port_candidates_str }}"
+        DEFAULT_PORT: "{{ db_port_default }}"
+      register: pg_host_port
+      changed_when: false
+
+    - name: Set chosen DB host port
+      when: use_docker_db and not dbpf.stat.exists
+      ansible.builtin.set_fact:
+        db_port_effective: "{{ pg_host_port.stdout | trim }}"
+
+    - name: Record DB host port for DOWN
+      when: use_docker_db
+      ansible.builtin.shell: "echo {{ db_port_effective | default(db_port_default) }} > '{{ db_port_file }}'"
+      args: { executable: /bin/bash }
+
+    - name: Ensure DB container is running
+      when: use_docker_db
+      ansible.builtin.shell: |
+        set -e
+        if ! docker ps --format '{{ "{{.Names}}" }}' | grep -qx '{{ db_container_name }}'; then
+          docker rm -f '{{ db_container_name }}' >/dev/null 2>&1 || true
+          docker run -d --name '{{ db_container_name }}' \
+            -e POSTGRES_DB='{{ db_name }}' \
+            -e POSTGRES_USER='{{ db_user }}' \
+            -e POSTGRES_PASSWORD='{{ db_password }}' \
+            -p {{ (db_port_effective | default(db_port_default)) }}:5432 \
+            -v "{{ project_root }}/.pgdata:/var/lib/postgresql/data" \
+            '{{ db_image }}'
+        fi
+      args: { executable: /bin/bash }
+
+    - name: Wait for Postgres to accept connections
+      when: use_docker_db
+      ansible.builtin.wait_for:
+        host: "127.0.0.1"
+        port: "{{ (db_port_effective | default(db_port_default)) | int }}"
+        delay: 1
+        timeout: 120
+
+    - name: Compute DATABASE_URL
+      ansible.builtin.set_fact:
+        DATABASE_URL: >-
+          {{ ("postgresql+psycopg2://" ~ db_user ~ ":" ~ db_password ~ "@127.0.0.1:" ~ ((db_port_effective | default(db_port_default)) | string) ~ "/" ~ db_name)
+             if use_docker_db else sqlite_url_abs }}
+
+    ###########################################################################
+    # Frontend build (served via `serve` on :3000)
+    ###########################################################################
+    - name: Ensure nvm installed
+      ansible.builtin.shell: |
+        set -e
+        if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
+          curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        fi
+      args: { executable: /bin/bash }
+
+    - name: Use Node {{ node_version }} with nvm
+      ansible.builtin.shell: |
+        set -e
+        export NVM_DIR="$HOME/.nvm"
+        . "$NVM_DIR/nvm.sh"
+        nvm install {{ node_version }}
+        nvm use {{ node_version }}
+      args: { executable: /bin/bash }
+
+    - name: Install frontend deps (ci if lock present)
+      ansible.builtin.shell: |
+        set -e
+        export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use {{ node_version }}
+        if [ -f package-lock.json ]; then
+          npm ci || (echo "[warn] npm ci failed; falling back to npm install"; npm install)
+        else
+          npm install
+        fi
+      args:
+        chdir: "{{ frontend_dir }}"
+        executable: /bin/bash
+
+    - name: Build React app
+      ansible.builtin.shell: |
+        set -e
+        export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use {{ node_version }}
+        export NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}
+        npm run build
+      args:
+        chdir: "{{ frontend_dir }}"
+        executable: /bin/bash
+
+    ###########################################################################
+    # Start services (kill any previous, then start new)
+    ###########################################################################
+    - name: Stop any existing backend/frontend processes (pid files)
+      ansible.builtin.shell: |
+        set -e
+        for svc in backend frontend; do
+          if [ -f "{{ logs_dir }}/$svc.pid" ]; then
+            kill "$(cat '{{ logs_dir }}/$svc.pid')" 2>/dev/null || true
+            rm -f "{{ logs_dir }}/$svc.pid"
+          fi
+        done
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Free ports 5000 and 3000 (best effort)
+      ansible.builtin.shell: |
+        (command -v fuser >/dev/null 2>&1 && fuser -k 5000/tcp 3000/tcp) \
+        || (command -v lsof  >/dev/null 2>&1 && lsof -ti tcp:5000,tcp:3000 | xargs -r kill -9) \
+        || true
+      args: { executable: /bin/bash }
+      ignore_errors: true
+
+    - name: Start Flask backend (writes pid/log)
+      ansible.builtin.shell: |
+        set -e
+        . "{{ venv_dir }}/bin/activate"
+        export FLASK_APP=app.py
+        export DATABASE_URL="{{ DATABASE_URL }}"
+        nohup flask run --host 0.0.0.0 --port 5000 >"{{ logs_dir }}/backend.out" 2>&1 &
+        echo $! > "{{ logs_dir }}/backend.pid"
+      args:
+        chdir: "{{ backend_dir }}"
+        executable: /bin/bash
+
+    - name: Start static frontend (serve build on :3000)
+      ansible.builtin.shell: |
+        set -e
+        export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use {{ node_version }}
+        cd "{{ frontend_dir }}/build"
+        nohup npx --yes serve -s . -l 3000 >"{{ logs_dir }}/frontend.out" 2>&1 &
+        echo $! > "{{ logs_dir }}/frontend.pid"
+      args: { executable: /bin/bash }
+
+    - name: Print endpoints
+      ansible.builtin.debug:
+        msg:
+          - "Backend:  http://127.0.0.1:5000"
+          - "Frontend: http://localhost:3000"
+          - "DB:       dockerized Postgres on :{{ (db_port_effective | default(db_port_default)) }}"
+          - "DATABASE_URL: {{ DATABASE_URL }}"
+          - "Logs:     {{ logs_dir }}"

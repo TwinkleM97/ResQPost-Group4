@@ -1,0 +1,20 @@
+[DB] Using: postgresql+psycopg2://postgres:password@127.0.0.1:5434/resqpost
+ * Serving Flask app 'app.py'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://172.27.133.27:5000
+Press CTRL+C to quit
+127.0.0.1 - - [13/Aug/2025 22:41:01] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:41:35] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:41:39] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:41:41] "GET /api/alerts/e0eb1de2-af0e-4b0d-af8c-3dc44295a3d1 HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:41:44] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:00] "POST /api/alerts HTTP/1.1" 201 -
+127.0.0.1 - - [13/Aug/2025 22:42:02] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:02] "GET /uploads/e175b29a-129a-4769-8f97-f1c566bfe509_61b612b9-c74b-41df-8b08-8377a1d2732e.png HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:19] "GET /api/alerts/e0eb1de2-af0e-4b0d-af8c-3dc44295a3d1 HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:40] "GET /api/alerts HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:40] "GET /api/alerts/80518664-6889-4506-b5d7-9a864523a9dc HTTP/1.1" 200 -
+127.0.0.1 - - [13/Aug/2025 22:42:54] "GET /api/alerts HTTP/1.1" 200 -

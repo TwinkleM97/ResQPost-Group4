@@ -1,0 +1,19 @@
+# ===== Python packages for backend =====
+Flask==3.0.3
+SQLAlchemy==2.0.32
+Flask-SQLAlchemy==3.1.1
+python-dotenv==1.0.1
+pytest==8.3.2
+coverage==7.6.1
+psycopg2-binary==2.9.9
+PyMySQL==1.1.1
+
+# ===== System packages for WSL dev =====
+# (These are installed with apt, not pip, but listed here for reference)
+# python3
+# python3-pip
+# python3-venv
+# nodejs
+# npm
+# docker
+# docker-compose
